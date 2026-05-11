@@ -116,15 +116,28 @@ export async function POST(req: NextRequest) {
       .eq('id', clientId)
       .eq('organization_id', orgId)
   } else {
-    const { data: inserted } = await admin
+    const slugBase = companyName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 50) || 'workspace'
+    const slug = `${slugBase}-${Date.now().toString(36)}`
+    const { data: inserted, error: insertErr } = await admin
       .from('clients')
       .insert({
         organization_id: orgId,
         name: companyName,
+        slug,
         brain: brainWithMeta,
       })
       .select('id')
       .single()
+    if (insertErr) {
+      return NextResponse.json(
+        { error: 'persist_failed', message: insertErr.message },
+        { status: 500 }
+      )
+    }
     clientId = inserted?.id ?? null
   }
 

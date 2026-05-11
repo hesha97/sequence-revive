@@ -113,11 +113,12 @@ export async function POST(req: NextRequest) {
   const json = await upstream.json() as { results?: LemlistLead[] }
   const results = json.results ?? []
 
-  // Upsert into prospects. Key by (organization_id, lemlist_lead_id).
+  // Upsert into prospects. Key by (organization_id, source, source_id) — source_id
+  // is the vendor-agnostic identifier (Lemlist today, Apollo / manual later).
   const rows = results.map((r) => ({
     organization_id: orgId,
     client_id: client.id,
-    lemlist_lead_id: r._id,
+    source_id: r._id,
     first_name: r.firstName ?? null,
     last_name: r.lastName ?? null,
     company_name: r.companyName ?? null,
@@ -128,16 +129,24 @@ export async function POST(req: NextRequest) {
   }))
 
   if (rows.length > 0) {
-    // Try upsert keyed by lemlist_lead_id within org. Falls back to per-row insert/update if needed.
-    await admin
+    // Best-effort dedupe — if no unique index on (org, source, source_id) yet, fall back to insert with manual filter.
+    const { data: existing } = await admin
       .from('prospects')
-      .upsert(rows, { onConflict: 'organization_id,lemlist_lead_id', ignoreDuplicates: false })
+      .select('source_id')
+      .eq('organization_id', orgId)
+      .eq('source', 'lemlist')
+      .in('source_id', rows.map((r) => r.source_id).filter((v): v is string => Boolean(v)))
+    const existingIds = new Set((existing ?? []).map((e) => e.source_id))
+    const toInsert = rows.filter((r) => r.source_id && !existingIds.has(r.source_id))
+    if (toInsert.length > 0) {
+      await admin.from('prospects').insert(toInsert)
+    }
   }
 
-  // Re-fetch the org's prospects (includes any verdicts from prior sessions)
+  // Re-fetch the org's prospects (includes any verdicts persisted in research jsonb).
   const { data: prospectRows } = await admin
     .from('prospects')
-    .select('id, lemlist_lead_id, first_name, last_name, company_name, job_title, linkedin_url, email, research, intel_status, verdict, outcome, source')
+    .select('id, source_id, first_name, last_name, company_name, job_title, linkedin_url, email, research, intel_status, source')
     .eq('organization_id', orgId)
     .eq('client_id', client.id)
     .order('created_at', { ascending: false })

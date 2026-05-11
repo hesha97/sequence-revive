@@ -30,12 +30,12 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   // Load the prospect, confirm it belongs to this org
   const { data: prospect } = await admin
     .from('prospects')
-    .select('id, lemlist_lead_id, email')
+    .select('id, source, source_id, email')
     .eq('id', params.id)
     .eq('organization_id', orgId)
     .single()
-  if (!prospect || !prospect.lemlist_lead_id) {
-    return NextResponse.json({ error: 'Prospect not found' }, { status: 404 })
+  if (!prospect || !prospect.source_id || prospect.source !== 'lemlist') {
+    return NextResponse.json({ error: 'Prospect not found or not enrichable' }, { status: 404 })
   }
 
   const key = process.env.LEMLIST_API_KEY
@@ -46,7 +46,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
 
   let upstream: Response
   try {
-    upstream = await fetch(`${LEMLIST_BASE}/leads/${prospect.lemlist_lead_id}`, {
+    upstream = await fetch(`${LEMLIST_BASE}/leads/${prospect.source_id}`, {
       headers: { Authorization: `Basic ${token}`, Accept: 'application/json' },
       cache: 'no-store',
     })

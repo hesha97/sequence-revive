@@ -14,14 +14,14 @@ export async function POST(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
 
-  let body: { reply_text?: string; campaign_prospect_id?: string }
+  let body: { reply_text?: string; prospect_id?: string }
   try {
     body = await req.json()
   } catch {
     return NextResponse.json({ error: 'Bad JSON' }, { status: 400 })
   }
-  if (!body.reply_text || !body.campaign_prospect_id) {
-    return NextResponse.json({ error: 'reply_text and campaign_prospect_id required' }, { status: 400 })
+  if (!body.reply_text || !body.prospect_id) {
+    return NextResponse.json({ error: 'reply_text and prospect_id required' }, { status: 400 })
   }
 
   const admin = createAdminClient()
@@ -33,27 +33,21 @@ export async function POST(req: NextRequest) {
   const orgId = memberRows?.[0]?.organization_id
   if (!orgId) return NextResponse.json({ error: 'No organization' }, { status: 500 })
 
-  // Walk: campaign_prospect -> campaign (confirm org) -> prospect -> client.brain
-  const { data: cp } = await admin
-    .from('campaign_prospects')
-    .select('campaign_id, prospect_id')
-    .eq('id', body.campaign_prospect_id)
+  // Load prospect (org-scoped) + the client brain for that prospect.
+  const { data: prospect } = await admin
+    .from('prospects')
+    .select('first_name, last_name, company_name, client_id')
+    .eq('id', body.prospect_id)
+    .eq('organization_id', orgId)
     .single()
-  if (!cp) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  if (!prospect) return NextResponse.json({ error: 'Prospect not found' }, { status: 404 })
 
-  const { data: campaign } = await admin
-    .from('campaigns')
-    .select('organization_id, client_id')
-    .eq('id', cp.campaign_id)
+  const { data: client } = await admin
+    .from('clients')
+    .select('brain')
+    .eq('id', prospect.client_id)
+    .eq('organization_id', orgId)
     .single()
-  if (!campaign || campaign.organization_id !== orgId) {
-    return NextResponse.json({ error: 'Wrong org' }, { status: 403 })
-  }
-
-  const [{ data: prospect }, { data: client }] = await Promise.all([
-    admin.from('prospects').select('first_name, last_name, company_name').eq('id', cp.prospect_id).single(),
-    admin.from('clients').select('brain').eq('id', campaign.client_id).single(),
-  ])
   const brain = (client?.brain as Brain) ?? {}
 
   const prompt = `Someone replied to your outreach. Draft a warm, concise reply.

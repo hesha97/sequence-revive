@@ -46,7 +46,7 @@ export type Brain = {
 
 export type ProspectRow = {
   id: string
-  lemlist_lead_id: string | null
+  source_id: string | null
   first_name: string | null
   last_name: string | null
   company_name: string | null
