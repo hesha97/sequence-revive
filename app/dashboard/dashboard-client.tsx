@@ -11,9 +11,10 @@ interface DashboardClientProps {
   userEmail: string
   org: Organization | null
   role: string | null
+  debugInfo?: string | null
 }
 
-export function DashboardClient({ userEmail, org, role }: DashboardClientProps) {
+export function DashboardClient({ userEmail, org, role, debugInfo }: DashboardClientProps) {
   async function handleSignOut() {
     await fetch('/auth/signout', { method: 'POST' })
     window.location.href = '/auth/login'
@@ -21,7 +22,6 @@ export function DashboardClient({ userEmail, org, role }: DashboardClientProps) 
 
   return (
     <main className="min-h-screen bg-soul">
-      {/* Top bar */}
       <header className="border-b border-earth-deep">
         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
           <p className="font-mono text-fg-secondary text-xs tracking-widest uppercase">
@@ -39,7 +39,6 @@ export function DashboardClient({ userEmail, org, role }: DashboardClientProps) 
         </div>
       </header>
 
-      {/* Body */}
       <div className="max-w-6xl mx-auto px-6 py-16">
         <h1 className="font-serif text-4xl text-fg-primary mb-2">
           Welcome to your workspace.
@@ -49,6 +48,12 @@ export function DashboardClient({ userEmail, org, role }: DashboardClientProps) 
             ? `${org.name} \u00B7 ${org.plan} plan \u00B7 role: ${role}`
             : 'Setting up your workspace\u2026'}
         </p>
+
+        {debugInfo && (
+          <p className="text-signal-hot text-xs font-mono mb-4">
+            {debugInfo}
+          </p>
+        )}
 
         <div className="border border-earth-deep rounded-lg p-12 bg-earth-surface">
           <p className="font-mono text-fg-tertiary text-xs uppercase tracking-widest mb-4">
