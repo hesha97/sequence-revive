@@ -20,26 +20,13 @@ export default async function ConversationsPage() {
 
   let replyCount = 0
   if (orgId) {
-    // Count replies via campaign_prospects -> campaigns -> org
-    const { data: campaigns } = await admin
-      .from('campaigns')
-      .select('id')
+    // replies.organization_id is set directly — no FK walk needed.
+    const { count } = await admin
+      .from('replies')
+      .select('id', { count: 'exact', head: true })
       .eq('organization_id', orgId)
-    const campaignIds = (campaigns ?? []).map((c) => c.id)
-    if (campaignIds.length > 0) {
-      const { data: cps } = await admin
-        .from('campaign_prospects')
-        .select('id')
-        .in('campaign_id', campaignIds)
-      const cpIds = (cps ?? []).map((c) => c.id)
-      if (cpIds.length > 0) {
-        const { count } = await admin
-          .from('replies')
-          .select('id', { count: 'exact', head: true })
-          .in('campaign_prospect_id', cpIds)
-        replyCount = count ?? 0
-      }
-    }
+      .eq('direction', 'inbound')
+    replyCount = count ?? 0
   }
 
   return (

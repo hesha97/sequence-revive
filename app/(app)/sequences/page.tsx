@@ -108,14 +108,17 @@ export default async function SequencesPage() {
 
   const missing = strong.filter((p) => !existingByProspect.has(p.id))
   if (missing.length > 0) {
-    await admin.from('campaign_prospects').insert(
+    const { error: cpInsertErr } = await admin.from('campaign_prospects').insert(
       missing.map((p) => ({
+        organization_id: orgId,
         campaign_id: campaignId,
         prospect_id: p.id,
         generation_status: 'pending',
-        verdict: 'strong',
       }))
     )
+    if (cpInsertErr) {
+      throw new Error(`Failed to add prospects to campaign: ${cpInsertErr.message}`)
+    }
   }
 
   // Re-fetch with prospect names joined

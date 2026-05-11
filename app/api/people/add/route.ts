@@ -43,8 +43,14 @@ export async function POST(req: NextRequest) {
     .order('created_at', { ascending: true })
     .limit(1)
   const clientId = clientRows?.[0]?.id ?? null
+  if (!clientId) {
+    return NextResponse.json(
+      { error: 'no_client', message: 'Compile your brain in onboarding first.' },
+      { status: 400 }
+    )
+  }
 
-  const { data: inserted } = await admin
+  const { data: inserted, error: insertErr } = await admin
     .from('prospects')
     .insert({
       organization_id: orgId,
@@ -58,8 +64,12 @@ export async function POST(req: NextRequest) {
       source: 'manual',
       intel_status: 'pending',
     })
-    .select('id, lemlist_lead_id, first_name, last_name, company_name, job_title, linkedin_url, email, research, intel_status, source')
+    .select('id, source_id, first_name, last_name, company_name, job_title, linkedin_url, email, research, intel_status, source')
     .single()
+
+  if (insertErr) {
+    return NextResponse.json({ error: 'insert_failed', message: insertErr.message }, { status: 500 })
+  }
 
   return NextResponse.json({ prospect: inserted })
 }

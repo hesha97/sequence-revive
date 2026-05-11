@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
 
   let query = admin
     .from('prospects')
-    .select('id, lemlist_lead_id, first_name, last_name, company_name, job_title, linkedin_url, email, research, intel_status, source')
+    .select('id, source_id, first_name, last_name, company_name, job_title, linkedin_url, email, research, intel_status, source')
     .eq('organization_id', orgId)
     .order('created_at', { ascending: false })
   if (onlyId) {

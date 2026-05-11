@@ -229,19 +229,36 @@ export function ApproveClient({
   const [items, setItems] = useState<ApproveItem[]>(initialItems)
   const [activating, setActivating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [saveErrors, setSaveErrors] = useState<Record<string, string>>({})
 
-  const allReady = items.length > 0 && items.every((i) => i.status === 'ready' && i.sequence !== null)
+  // Block activate until every prospect is ready AND no edit has an unresolved save error.
+  const noSaveErrors = Object.keys(saveErrors).length === 0
+  const allReady =
+    items.length > 0 &&
+    items.every((i) => i.status === 'ready' && i.sequence !== null) &&
+    noSaveErrors
 
-  function updateSequence(id: string, seq: Sequence) {
+  async function updateSequence(id: string, seq: Sequence) {
     setItems((prev) => prev.map((i) => (i.id === id ? { ...i, sequence: seq } : i)))
-    // Debounce-light: fire and forget. Editing UX feels instant.
-    fetch('/api/sequences/save-edit', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ campaignProspectId: id, sequence: seq }),
-    }).catch(() => {
-      // silent — operator can hit save again
-    })
+    try {
+      const res = await fetch('/api/sequences/save-edit', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ campaignProspectId: id, sequence: seq }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.message ?? err.error ?? `save_failed_${res.status}`)
+      }
+      setSaveErrors((prev) => {
+        if (!prev[id]) return prev
+        const next = { ...prev }
+        delete next[id]
+        return next
+      })
+    } catch (e) {
+      setSaveErrors((prev) => ({ ...prev, [id]: (e as Error).message }))
+    }
   }
 
   async function activate() {
@@ -295,7 +312,14 @@ export function ApproveClient({
       <div className="flex-1 px-8 py-6">
         <div className="max-w-3xl mx-auto">
           {items.map((item) => (
-            <ProspectSequence key={item.id} item={item} onSave={updateSequence} />
+            <div key={item.id}>
+              <ProspectSequence item={item} onSave={updateSequence} />
+              {saveErrors[item.id] && (
+                <p className="text-signal-hot font-mono text-xs px-1 -mt-4 mb-4">
+                  Edit didn&apos;t save: {saveErrors[item.id]}. Retry by typing again.
+                </p>
+              )}
+            </div>
           ))}
         </div>
       </div>
