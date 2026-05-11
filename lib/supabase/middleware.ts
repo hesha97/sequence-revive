@@ -39,11 +39,22 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser()
 
-  // Gate /dashboard — unauthenticated users get bounced to login
-  if (
-    !user &&
-    request.nextUrl.pathname.startsWith('/dashboard')
-  ) {
+  // Gate every authenticated route — unauthenticated users get bounced to login
+  const protectedPrefixes = [
+    '/dashboard',
+    '/onboarding',
+    '/today',
+    '/prospects',
+    '/sequences',
+    '/conversations',
+    '/pipeline',
+    '/people',
+    '/voice',
+    '/settings',
+  ]
+  const path = request.nextUrl.pathname
+  const isProtected = protectedPrefixes.some((p) => path === p || path.startsWith(`${p}/`))
+  if (!user && isProtected) {
     const url = request.nextUrl.clone()
     url.pathname = '/auth/login'
     return NextResponse.redirect(url)
