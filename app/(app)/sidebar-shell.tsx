@@ -15,11 +15,11 @@ const TABS: Tab[] = [
   { href: '/today', label: 'Today', live: true },
   { href: '/prospects', label: 'People you might say hi to', live: true },
   { href: '/sequences', label: 'The wave', live: true },
-  { href: '/conversations', label: 'Conversations', live: false },
-  { href: '/pipeline', label: "What's brewing", live: false },
-  { href: '/people', label: 'Everyone', live: false },
-  { href: '/voice', label: 'Your voice', live: false },
-  { href: '/settings', label: 'Settings', live: false },
+  { href: '/conversations', label: 'Conversations', live: true },
+  { href: '/pipeline', label: "What's brewing", live: true },
+  { href: '/people', label: 'Everyone', live: true },
+  { href: '/voice', label: 'Your voice', live: true },
+  { href: '/settings', label: 'Settings', live: true },
 ]
 
 export function SidebarShell({
