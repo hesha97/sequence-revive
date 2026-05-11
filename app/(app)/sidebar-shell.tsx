@@ -13,7 +13,7 @@ type Tab = {
 
 const TABS: Tab[] = [
   { href: '/today', label: 'Today', live: true },
-  { href: '/prospects', label: 'People you might say hi to', live: false },
+  { href: '/prospects', label: 'People you might say hi to', live: true },
   { href: '/sequences', label: 'The wave', live: false },
   { href: '/conversations', label: 'Conversations', live: false },
   { href: '/pipeline', label: "What's brewing", live: false },
