@@ -1,10 +1,14 @@
+// ⚠️ TIER-1 TEST VARIANT — web_search capped to 1 iteration AND the company
+// search leg is dropped entirely (only the person search runs). Production
+// branch (claude/create-claude-md-R5fhF) runs person + company in parallel
+// with default web_search iteration count for richer intel. Restore the
+// company leg + remove max_uses after Tier 2 upgrade.
 // POST /api/ai/research-prospect
-// JSON-mode intel via Anthropic web_search. Two parallel calls (person + company).
+// JSON-mode intel via Anthropic web_search.
 //
-// Error doctrine (Fix 5):
-//   both fail   → intel_status='failed', 502 with both errors
-//   one fails   → intel_status='ready', save partial intel, 200 with warning
-//   both ok     → intel_status='ready', save full intel, 200
+// Error doctrine:
+//   fail   → intel_status='failed', 502 with error
+//   ok     → intel_status='ready', save intel, 200
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { callAnthropic, extractText, parseJsonLoose } from '@/lib/anthropic'
@@ -20,11 +24,6 @@ type PersonResult = {
   signal_strength?: 'hot' | 'warm' | 'cold'
 }
 
-type CompanyResult = {
-  about_company?: string
-  recent_signals?: string[]
-}
-
 type LegResult<T> = { ok: true; data: T } | { ok: false; error: string }
 
 async function searchPerson(p: {
@@ -36,7 +35,7 @@ async function searchPerson(p: {
   const fullName = `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim() || '(unnamed)'
   const prompt = `Research this person for B2B outreach context: ${fullName}, ${p.job_title ?? '(no title)'} at ${p.company_name ?? '(no company)'}.
 
-Search the web. Then return ONLY a JSON object (no markdown, no prose):
+Search the web once. Then return ONLY a JSON object (no markdown, no prose):
 {
   "about_them": "3 sentences about their recent role, posts, signals, priorities",
   "conversation_hook": "1-2 sentences: specific opening angle referencing a real recent thing",
@@ -48,7 +47,11 @@ Search the web. Then return ONLY a JSON object (no markdown, no prose):
       {
         systemPrompt: 'Output ONLY valid JSON.',
         maxTokens: 1500,
-        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+        tools: [{
+          type: 'web_search_20250305',
+          name: 'web_search',
+          max_uses: 1, // TIER-1 TEST ONLY — production uses default iterations
+        }],
       }
     )
     const text = extractText(content)
@@ -59,31 +62,9 @@ Search the web. Then return ONLY a JSON object (no markdown, no prose):
   }
 }
 
-async function searchCompany(companyName: string | null): Promise<LegResult<CompanyResult>> {
-  if (!companyName) return { ok: false, error: 'no company name on record' }
-  const prompt = `Research this company: ${companyName}. Recent news, hiring, funding, RFPs, leadership changes (last 6 months).
-
-Return ONLY JSON:
-{
-  "about_company": "3 sentences max — recent moves, hiring, news",
-  "recent_signals": ["list of 2-3 specific recent events"]
-}`
-  try {
-    const content = await callAnthropic(
-      [{ role: 'user', content: prompt }],
-      {
-        systemPrompt: 'Output ONLY valid JSON.',
-        maxTokens: 1500,
-        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
-      }
-    )
-    const text = extractText(content)
-    const data = parseJsonLoose<CompanyResult>(text)
-    return { ok: true, data }
-  } catch (e) {
-    return { ok: false, error: (e as Error).message }
-  }
-}
+// TODO (Tier 2): restore searchCompany() — runs in parallel with searchPerson()
+// using web_search. See production branch claude/create-claude-md-R5fhF for the
+// full implementation. Dropped here to halve per-prospect token cost.
 
 export async function POST(req: NextRequest) {
   const supabase = createClient()
@@ -123,20 +104,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Prospect not found' }, { status: 404 })
   }
 
-  // Mark researching
   await admin
     .from('prospects')
     .update({ intel_status: 'researching' })
     .eq('id', prospect.id)
     .eq('organization_id', orgId)
 
-  const [person, company] = await Promise.all([
-    searchPerson(prospect),
-    searchCompany(prospect.company_name),
-  ])
+  // TIER-1: only person search runs. Company search is dropped to fit token budget.
+  const person = await searchPerson(prospect)
 
-  // Both failed → mark failed + 502 with both errors
-  if (!person.ok && !company.ok) {
+  if (!person.ok) {
     await admin
       .from('prospects')
       .update({ intel_status: 'failed' })
@@ -151,30 +128,22 @@ export async function POST(req: NextRequest) {
       metadata: {
         prospect_id: prospect.id,
         person_ok: false,
-        company_ok: false,
+        company_ok: 'skipped_tier_1',
         person_error: person.error,
-        company_error: company.error,
       },
     })
 
     return NextResponse.json({
       error: 'research_failed',
-      message: `Person: ${person.error}. Company: ${company.error}.`,
+      message: person.error,
       person_error: person.error,
-      company_error: company.error,
     }, { status: 502 })
   }
 
-  // At least one succeeded
-  const personData = person.ok ? person.data : {}
-  const companyData = company.ok ? company.data : {}
-
   const intel: ProspectIntel = {
-    about_them: personData.about_them,
-    about_company: companyData.about_company,
-    hook: personData.conversation_hook,
-    signal: personData.signal_strength,
-    recent_signals: companyData.recent_signals,
+    about_them: person.data.about_them,
+    hook: person.data.conversation_hook,
+    signal: person.data.signal_strength,
     researched_at: new Date().toISOString(),
   }
 
@@ -197,20 +166,10 @@ export async function POST(req: NextRequest) {
     cost_usd: 0,
     metadata: {
       prospect_id: prospect.id,
-      person_ok: person.ok,
-      company_ok: company.ok,
-      person_error: person.ok ? null : person.error,
-      company_error: company.ok ? null : company.error,
+      person_ok: true,
+      company_ok: 'skipped_tier_1',
     },
   })
 
-  // Build response with optional warning if a leg failed
-  const warning =
-    !person.ok
-      ? `Person research came back empty — ${person.error}`
-      : !company.ok
-      ? `Company research came back empty — ${company.error}`
-      : undefined
-
-  return NextResponse.json({ intel, warning })
+  return NextResponse.json({ intel })
 }

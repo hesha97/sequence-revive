@@ -1,3 +1,8 @@
+// ⚠️ TIER-1 TEST VARIANT — callAnthropic retries once on HTTP 429 after a
+// 60-second sleep, then surfaces a clean user-facing error message.
+// Production branch (claude/create-claude-md-R5fhF) has no retry; restore to
+// the production version after Tier 2 upgrade if you want stricter failure.
+//
 // Server-only Anthropic helper. Direct fetch to /v1/messages — no SDK dependency.
 // callAnthropic(messages, options) returns the raw content blocks array.
 // extractText(content) concatenates every text block into one string.
@@ -31,9 +36,11 @@ export type ContentBlock = {
 }
 
 // Calls Anthropic /v1/messages. Throws on missing key or non-2xx response.
+// TIER-1: on 429, sleeps 60s and retries once before surfacing a friendly error.
 export async function callAnthropic(
   messages: AnthropicMessage[],
-  options: CallOptions = {}
+  options: CallOptions = {},
+  retried = false
 ): Promise<ContentBlock[]> {
   const key = process.env.ANTHROPIC_API_KEY
   if (!key) {
@@ -59,6 +66,15 @@ export async function callAnthropic(
     body: JSON.stringify(body),
     cache: 'no-store',
   })
+
+  // TIER-1 TEST: one polite retry after 60s on 429, then surface a clean error.
+  if (res.status === 429) {
+    if (!retried) {
+      await new Promise((r) => setTimeout(r, 60000))
+      return callAnthropic(messages, options, true)
+    }
+    throw new Error('AI quota is busy. Try again in about a minute, or upgrade your Anthropic tier.')
+  }
 
   if (!res.ok) {
     const errBody = await res.text()

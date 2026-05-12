@@ -1,3 +1,8 @@
+// ⚠️ TIER-1 TEST VARIANT — web_search capped to 1 iteration and market intel
+// asks for 3 fields instead of 5 to fit Anthropic's 30,000 input tokens/min
+// limit. Production branch (claude/create-claude-md-R5fhF) uses max_uses: 3
+// and the full 5-field market intel prompt for richer research. Restore those
+// values after Tier 2 upgrade.
 // POST /api/ai/compile-brain
 // Two-step brain synthesis:
 //   A) web_search market intel from the operator's company + win story
@@ -24,6 +29,9 @@ function buildMarketIntelPrompt(answers: Record<string, unknown>): string {
   const whatYouSell = (answers['what-you-sell'] as string) ?? ''
   const winStory = (answers['biggest-win-story'] as string) ?? ''
 
+  // TIER-1 TEST: trimmed from 5 fields to 3. COMMON_OBJECTION and BUYING_SIGNALS
+  // are dropped from the research call — the synthesis step still includes them
+  // in its output spec, the AI will infer from intake answers alone.
   return `Research this B2B company so we can write better outreach for them.
 
 Company: ${companyName}
@@ -31,19 +39,13 @@ Website: ${companyWebsite}
 What they do: ${whatYouSell}
 A favorite client win: ${winStory}
 
-Search the web. Then return EXACTLY this format (no preamble, no markdown fences):
+Search the web once. Then return EXACTLY this format (no preamble, no markdown fences):
 
 DAILY_PAIN:
-[1 sentence — the most likely pain their typical buyer feels every day, inferred from what this company solves]
-
-COMMON_OBJECTION:
-[1 sentence — the objection their buyers most likely raise]
+[1 sentence — the most likely pain their typical buyer feels every day]
 
 WINNING_ARGUMENT:
 [1 sentence — the strongest closing argument for this kind of offer]
-
-BUYING_SIGNALS:
-[3-5 short signals to watch for, comma-separated — e.g. "new funding, exec hire, hiring sprint, RFP published"]
 
 MARKET_CONTEXT:
 [2 sentences max — what's happening in their industry right now that's relevant]`
@@ -132,7 +134,11 @@ export async function POST(req: NextRequest) {
       {
         systemPrompt: MARKET_INTEL_SYSTEM,
         maxTokens: 1500,
-        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+        tools: [{
+          type: 'web_search_20250305',
+          name: 'web_search',
+          max_uses: 1, // TIER-1 TEST ONLY — production uses default (multiple iterations)
+        }],
       }
     )
     marketIntel = extractText(content)
