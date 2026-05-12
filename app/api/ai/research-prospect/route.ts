@@ -1,12 +1,17 @@
 // POST /api/ai/research-prospect
-// JSON-mode intel for one prospect. Two parallel Anthropic web_search calls
-// (person + company), merged into ProspectIntel. K2 fix — no regex parsing.
+// JSON-mode intel via Anthropic web_search. Two parallel calls (person + company).
+//
+// Error doctrine (Fix 5):
+//   both fail   → intel_status='failed', 502 with both errors
+//   one fails   → intel_status='ready', save partial intel, 200 with warning
+//   both ok     → intel_status='ready', save full intel, 200
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { callAnthropic, extractText, parseJsonLoose } from '@/lib/anthropic'
 import type { ProspectIntel, ProspectResearch } from '@/lib/types'
 
 export const runtime = 'nodejs'
+export const maxDuration = 60
 export const dynamic = 'force-dynamic'
 
 type PersonResult = {
@@ -20,12 +25,14 @@ type CompanyResult = {
   recent_signals?: string[]
 }
 
+type LegResult<T> = { ok: true; data: T } | { ok: false; error: string }
+
 async function searchPerson(p: {
   first_name: string | null
   last_name: string | null
   job_title: string | null
   company_name: string | null
-}): Promise<PersonResult> {
+}): Promise<LegResult<PersonResult>> {
   const fullName = `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim() || '(unnamed)'
   const prompt = `Research this person for B2B outreach context: ${fullName}, ${p.job_title ?? '(no title)'} at ${p.company_name ?? '(no company)'}.
 
@@ -45,14 +52,15 @@ Search the web. Then return ONLY a JSON object (no markdown, no prose):
       }
     )
     const text = extractText(content)
-    return parseJsonLoose<PersonResult>(text)
-  } catch {
-    return {}
+    const data = parseJsonLoose<PersonResult>(text)
+    return { ok: true, data }
+  } catch (e) {
+    return { ok: false, error: (e as Error).message }
   }
 }
 
-async function searchCompany(companyName: string | null): Promise<CompanyResult> {
-  if (!companyName) return {}
+async function searchCompany(companyName: string | null): Promise<LegResult<CompanyResult>> {
+  if (!companyName) return { ok: false, error: 'no company name on record' }
   const prompt = `Research this company: ${companyName}. Recent news, hiring, funding, RFPs, leadership changes (last 6 months).
 
 Return ONLY JSON:
@@ -70,9 +78,10 @@ Return ONLY JSON:
       }
     )
     const text = extractText(content)
-    return parseJsonLoose<CompanyResult>(text)
-  } catch {
-    return {}
+    const data = parseJsonLoose<CompanyResult>(text)
+    return { ok: true, data }
+  } catch (e) {
+    return { ok: false, error: (e as Error).message }
   }
 }
 
@@ -114,25 +123,58 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Prospect not found' }, { status: 404 })
   }
 
-  // Mark as researching
+  // Mark researching
   await admin
     .from('prospects')
     .update({ intel_status: 'researching' })
     .eq('id', prospect.id)
     .eq('organization_id', orgId)
 
-  // Parallel person + company search (JSON mode — K2 fix)
   const [person, company] = await Promise.all([
     searchPerson(prospect),
     searchCompany(prospect.company_name),
   ])
 
+  // Both failed → mark failed + 502 with both errors
+  if (!person.ok && !company.ok) {
+    await admin
+      .from('prospects')
+      .update({ intel_status: 'failed' })
+      .eq('id', prospect.id)
+      .eq('organization_id', orgId)
+
+    await admin.from('usage_events').insert({
+      organization_id: orgId,
+      event_type: 'prospect_research',
+      cost_credits: 0,
+      cost_usd: 0,
+      metadata: {
+        prospect_id: prospect.id,
+        person_ok: false,
+        company_ok: false,
+        person_error: person.error,
+        company_error: company.error,
+      },
+    })
+
+    return NextResponse.json({
+      error: 'research_failed',
+      message: `Person: ${person.error}. Company: ${company.error}.`,
+      person_error: person.error,
+      company_error: company.error,
+    }, { status: 502 })
+  }
+
+  // At least one succeeded
+  const personData = person.ok ? person.data : {}
+  const companyData = company.ok ? company.data : {}
+
   const intel: ProspectIntel = {
-    about_them: person.about_them,
-    about_company: company.about_company,
-    hook: person.conversation_hook,
-    signal: person.signal_strength,
-    recent_signals: company.recent_signals,
+    about_them: personData.about_them,
+    about_company: companyData.about_company,
+    hook: personData.conversation_hook,
+    signal: personData.signal_strength,
+    recent_signals: companyData.recent_signals,
     researched_at: new Date().toISOString(),
   }
 
@@ -148,5 +190,27 @@ export async function POST(req: NextRequest) {
     .eq('id', prospect.id)
     .eq('organization_id', orgId)
 
-  return NextResponse.json({ intel })
+  await admin.from('usage_events').insert({
+    organization_id: orgId,
+    event_type: 'prospect_research',
+    cost_credits: 0,
+    cost_usd: 0,
+    metadata: {
+      prospect_id: prospect.id,
+      person_ok: person.ok,
+      company_ok: company.ok,
+      person_error: person.ok ? null : person.error,
+      company_error: company.ok ? null : company.error,
+    },
+  })
+
+  // Build response with optional warning if a leg failed
+  const warning =
+    !person.ok
+      ? `Person research came back empty — ${person.error}`
+      : !company.ok
+      ? `Company research came back empty — ${company.error}`
+      : undefined
+
+  return NextResponse.json({ intel, warning })
 }
