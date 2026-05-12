@@ -37,6 +37,10 @@ export type CallOptions = {
   model?: string
   tools?: AnthropicTool[]
   temperature?: number
+  // Pass an AbortController.signal to cap call wall-time from the caller.
+  // On abort, callAnthropic throws an AbortError; the caller decides how to
+  // recover (e.g. compile-brain falls back to no-market-intel synthesis).
+  signal?: AbortSignal
   // v6 safety-layer hooks (optional; existing callers untouched)
   organizationId?: string | null
   userId?: string | null
@@ -130,16 +134,41 @@ export async function callAnthropic(
   if (typeof options.temperature === 'number') body.temperature = options.temperature
 
   const startedAt = Date.now()
-  const res = await fetch(ANTHROPIC_BASE, {
-    method: 'POST',
-    headers: {
-      'x-api-key': key,
-      'anthropic-version': '2023-06-01',
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify(body),
-    cache: 'no-store',
-  })
+  let res: Response
+  try {
+    res = await fetch(ANTHROPIC_BASE, {
+      method: 'POST',
+      headers: {
+        'x-api-key': key,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      cache: 'no-store',
+      signal: options.signal,
+    })
+  } catch (e) {
+    const latencyMs = Date.now() - startedAt
+    const aborted = (e as Error).name === 'AbortError' || options.signal?.aborted
+    await recordAiCall({
+      organization_id: orgId,
+      user_id: userId,
+      call_type: callType,
+      model,
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_read_tokens: 0,
+      cache_creation_tokens: 0,
+      cost_usd: 0,
+      latency_ms: latencyMs,
+      success: false,
+      error_message: aborted
+        ? `aborted by caller after ${latencyMs}ms`
+        : `fetch failed: ${(e as Error).message}`,
+      metadata: options.metadata ?? null,
+    })
+    throw e
+  }
   const latencyMs = Date.now() - startedAt
 
   if (res.status === 429) {
