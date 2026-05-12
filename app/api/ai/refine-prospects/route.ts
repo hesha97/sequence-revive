@@ -42,7 +42,10 @@ export async function POST() {
   }
 
   const seedSummary = seeds
-    .map((s) => `- ${s.first_name ?? ''} ${s.last_name ?? ''}, ${s.job_title ?? '(no title)'} at ${s.company_name ?? '(no co)'}`)
+    .map((s) => {
+      const arch = (s.research as ProspectResearch | null)?.archetype ?? 'unspecified'
+      return `- ${s.first_name ?? ''} ${s.last_name ?? ''}, ${s.job_title ?? '(no title)'} at ${s.company_name ?? '(no co)'} (archetype: ${arch})`
+    })
     .join('\n')
 
   const remainingSummary = remaining
@@ -50,9 +53,11 @@ export async function POST() {
     .join('\n')
 
   const prompt = `The operator marked these as the EXACT type they want:
+
+SEED PATTERNS:
 ${seedSummary}
 
-Re-rank remaining by match to seed pattern (industry, role pattern, company stage, archetype). Return ONLY a JSON array of {index, score: 0-100, reason: "1 short sentence"} sorted descending. No prose.
+Re-rank the REMAINING prospects by match to seed pattern (industry, role pattern, company stage, archetype). Return ONLY a JSON array of {index, score: 0-100, reason: "1 short sentence"} sorted descending. No prose.
 
 REMAINING:
 ${remainingSummary}`

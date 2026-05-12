@@ -85,21 +85,31 @@ export async function POST(req: NextRequest) {
       : ''
 
   const prospectsSummary = prospects
-    .map((p, i) => `${i + 1}. ${p.first_name ?? ''} ${p.last_name ?? ''}, ${p.job_title ?? '(no title)'} at ${p.company_name ?? '(no co)'}`)
+    .map((p, i) => {
+      const meta = (p.research as ProspectResearch | null)?.lemlist_meta ?? {}
+      const country = meta.country ?? '—'
+      const dept = meta.department ?? '—'
+      return `${i + 1}. ${p.first_name ?? ''} ${p.last_name ?? ''}, ${p.job_title ?? '(no title)'} at ${p.company_name ?? '(no co)'} (${country}, ${dept})`
+    })
     .join('\n')
+
+  const industries = brain.search_filters?.industries ?? []
+  const signals = brain.buying_signals ?? []
+  const industriesLine = industries.length > 0 ? `\n- Industries of interest: ${industries.join(', ')}` : ''
+  const signalsLine = signals.length > 0 ? `\n- Buying signals: ${signals.join(', ')}` : ''
 
   const prompt = `You are scoring B2B prospects against this brain.
 
 BRAIN:
 - Company: ${brain.company_summary ?? ''}
 - Ideal buyer: ${brain.ideal_buyer_summary ?? ''}
-- Daily pain solved: ${brain.buyer_daily_pain ?? ''}
+- Daily pain solved: ${brain.buyer_daily_pain ?? ''}${signalsLine}${industriesLine}
 ${exclusionsBlock}
 
-PROSPECTS:
+PROSPECTS (1-indexed):
 ${prospectsSummary}
 
-Return ONLY a JSON array of {index: 1-${prospects.length}, score: 0-100, reason: "1 short sentence on why they fit", archetype: "1-3 word label like 'enterprise HR' or 'mid-market founder'"} sorted by score descending. No prose, no markdown.`
+Return ONLY a JSON array of {index: 1-${prospects.length}, score: 0-100, reason: "1 sentence", archetype: "1-3 word label"} sorted by score descending. No prose, no markdown.`
 
   let scored: Scored[]
   try {
