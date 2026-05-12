@@ -31,13 +31,23 @@ export function LoginForm() {
     setMessage(null)
 
     const supabase = createClient()
-    // signInWithOtp without emailRedirectTo still sends both a link AND the
-    // 6-digit code in the default Supabase template. shouldCreateUser=true
-    // ensures first-time signers can join.
+    // Pass emailRedirectTo so the magic link in the email routes back to the
+    // SAME origin where the user submitted the form — critical for the
+    // tier-1-test preview where the Supabase Site URL points at production.
+    // Without this, the link consistently lands on production and the PKCE
+    // verifier cookie (set on the preview origin) isn't readable, so the
+    // verify fails with otp_expired.
+    //
+    // The 6-digit code path doesn't depend on this — it's purely for users
+    // who'd rather click the link. The code path uses verifyOtp directly.
+    //
+    // For this to actually work, the preview origin must be in Supabase's
+    // Redirect URLs allowlist (Auth → URL Configuration in dashboard).
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: {
         shouldCreateUser: true,
+        emailRedirectTo: `${window.location.origin}/auth/callback`,
       },
     })
 
