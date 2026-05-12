@@ -2,15 +2,23 @@
 // Generates a 6-touch sequence for one prospect (M5 prompt).
 // K4 fix: tight try/catch with JSON-cleaning step around the parse, so a
 // single-prospect parse failure doesn't take down the batch.
-// Client calls this once per prospect, limiting concurrency to 5 in parallel.
+// Client calls this once per prospect, limiting concurrency to 3 in parallel.
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { callAnthropic, extractText, parseJsonLoose } from '@/lib/anthropic'
 import type { Brain, ProspectResearch, Sequence } from '@/lib/types'
 
 export const runtime = 'nodejs'
-export const maxDuration = 60
+// Pro-tier max. Anthropic Tier 1 can issue 429 with retry-after up to 60s;
+// our retry sleeps that long and re-fires (~20s), so the worst case is
+// ~80s per prospect. 60s was killing the retry path at the Vercel edge.
+export const maxDuration = 300
 export const dynamic = 'force-dynamic'
+
+// Hard wall-time cap per prospect. If we genuinely cannot get a sequence
+// in 2 minutes (including 429 retry), surface the failure cleanly so the
+// row goes to 'failed' and the operator can retry one prospect at a time.
+const SEQUENCE_TIMEOUT_MS = 120_000
 
 const SYSTEM =
   'You are an expert B2B copywriter who writes in the operator\'s exact voice. Output ONLY valid JSON. Never include markdown fences or prose outside the JSON.'
@@ -183,10 +191,20 @@ export async function POST(req: NextRequest) {
   const country = (research?.lemlist_meta?.country as string | undefined) ?? null
 
   let sequence: Sequence
+  const callAbort = new AbortController()
+  const callTimer = setTimeout(() => callAbort.abort(), SEQUENCE_TIMEOUT_MS)
   try {
     const content = await callAnthropic(
       [{ role: 'user', content: buildPrompt({ prospect, country, brain, intel }) }],
-      { systemPrompt: SYSTEM, maxTokens: 4000 }
+      {
+        systemPrompt: SYSTEM,
+        maxTokens: 4000,
+        signal: callAbort.signal,
+        organizationId: orgId,
+        userId: user.id,
+        callType: 'generate_sequence',
+        metadata: { campaign_prospect_id: cp.id, prospect_id: cp.prospect_id },
+      }
     )
     const text = extractText(content)
     sequence = parseJsonLoose<Sequence>(text)
@@ -205,11 +223,19 @@ export async function POST(req: NextRequest) {
       metadata: { prospect_id: cp.prospect_id, status: 'failed', error: (e as Error).message },
     })
 
+    const aborted = callAbort.signal.aborted
+    clearTimeout(callTimer)
     return NextResponse.json(
-      { error: 'generation_failed', message: (e as Error).message },
+      {
+        error: 'generation_failed',
+        message: aborted
+          ? `sequence write timed out after ${SEQUENCE_TIMEOUT_MS}ms`
+          : (e as Error).message,
+      },
       { status: 502 }
     )
   }
+  clearTimeout(callTimer)
 
   await admin
     .from('campaign_prospects')
