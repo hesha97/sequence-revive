@@ -22,57 +22,87 @@ function buildPrompt(args: {
     job_title: string | null
     company_name: string | null
   }
+  country: string | null
   brain: Brain
   intel: ProspectResearch['intel'] | undefined
 }): string {
   const intelBlock = args.intel
     ? `
-PER-PROSPECT INTEL (real web research — shape the OPENER, never state these as facts. Iceberg Rule):
+PER-PROSPECT INTEL (from real web research — use this to shape the OPENER, but never state these facts directly. Iceberg Rule: research informs tone, never appears verbatim):
 - About them: ${args.intel.about_them ?? ''}
 - About their company: ${args.intel.about_company ?? ''}
-- Opening angle: ${args.intel.hook ?? ''}
-- Buying signal: ${args.intel.signal ?? ''}
+- The opening angle to weave in: ${args.intel.hook ?? ''}
+- Buying signal strength: ${args.intel.signal ?? ''}
 `
     : ''
 
-  return `You are writing a 6-touch outreach sequence for ONE specific person.
+  return `You are writing a 6-touch outreach sequence for ONE specific person. Voice the company in. Never sound like a template.
 
-PERSON:
+PERSON YOU'RE WRITING TO:
 - Name: ${args.prospect.first_name ?? ''} ${args.prospect.last_name ?? ''}
 - Title: ${args.prospect.job_title ?? ''}
 - Company: ${args.prospect.company_name ?? ''}
+- Country: ${args.country ?? '—'}
 
-BRAIN:
+WHO IS WRITING (the brain):
 - Company summary: ${args.brain.company_summary ?? ''}
 - Voice essence: ${args.brain.voice_essence ?? ''}
 - Value props: ${(args.brain.key_value_props ?? []).join(', ')}
-- Proof: ${args.brain.named_proof ?? ''}
+- Proof points: ${args.brain.named_proof || '(none — lead with vision)'}
 
-BUYER PSYCHOLOGY:
-- Daily pain: ${args.brain.buyer_daily_pain ?? ''}
-- Common objection: ${args.brain.common_objection ?? ''} — preempt in email #2
-- Winning argument: ${args.brain.winning_argument ?? ''} — lead with this
-- Signals: ${(args.brain.buying_signals ?? []).join(', ')}
-- Market: ${args.brain.market_context ?? ''}
+THE BUYER PSYCHOLOGY (from market research — use this to shape every paragraph):
+- Their daily pain: ${args.brain.buyer_daily_pain || '(general operational friction)'}
+- Common objection: ${args.brain.common_objection || '(unspecified)'} — preempt this in email #2
+- Winning argument: ${args.brain.winning_argument || '(time to value)'} — lead with this
+- Buying signals to watch for: ${(args.brain.buying_signals ?? []).join(', ') || '(general)'}
+- Market context: ${args.brain.market_context || '(general)'}
 ${intelBlock}
+THE 6-TOUCH SEQUENCE (in order):
+1. Day 0 — LinkedIn visit (no message — just shows up in their notifications)
+2. Day 1 — LinkedIn invite with a short note (universal-ish, max 198 chars)
+3. Day 3 — Email #1 — the introduction email
+4. Day 7 — Email #2 — proof + new angle, progressively shorter
+5. Day 10 — CONDITIONAL: if LinkedIn invite accepted → LinkedIn DM. If not → gentle follow-up email.
+6. Day 14 — Soft breakup email with a kind goodbye
 
-THE 6-TOUCH SEQUENCE:
-1. Day 0 — LinkedIn visit (no message)
-2. Day 1 — LinkedIn invite (max 198 chars)
-3. Day 3 — Email #1 (~140 words, 3 paragraphs: intro+proof / pain+value / reply CTA)
-4. Day 7 — Email #2 (~80 words, new angle, preempt objection, "Re: <email #1 subject>")
-5. Day 10 — CONDITIONAL: if invite accepted, LinkedIn DM (~60 words). If not, email #3 (~50 words, Re: thread).
-6. Day 14 — Breakup email (~40 words, warm exit, Re: thread).
+EMAIL #1 RULES (the most important one):
+- 3 paragraphs, ~140 words
+- Paragraph 1: greeting + sender intro + 1-2 named-client proof points + (if intel hook exists) weave in the SPECIFIC opening that references the recent thing without stating it as a fact
+- Paragraph 2: department-specific angle. Touch the buyer's daily pain INDIRECTLY — never quote it back at them. Lead the value prop with the WINNING ARGUMENT shape (if winning_argument is "speed", lead with time; if "ROI", lead with cost; if "credibility", lead with track record).
+- Paragraph 3: reply-driving CTA — NOT "book a meeting" — instead "reply yes and I'll send a credentials pack" (AVL-aware)
+- Forward-survivable: sender clear by line 2, no attachments mentioned
+- Intel from research shapes tone, NEVER appears as stated facts (Iceberg Rule)
 
-Email #1 rules: Para 1 greeting + sender intro + 1-2 proof points + intel hook woven in (Iceberg Rule). Para 2 department angle, touch pain INDIRECTLY, lead with winning argument shape. Para 3 reply CTA — "reply yes and I'll send a credentials pack" (AVL-aware MENA corporate). Forward-survivable. Intel shapes tone, never appears as facts.
+EMAIL #2 RULES:
+- ~80 words, more direct
+- New angle (not a reminder of email #1)
+- Add one piece of proof not in email #1
+- PREEMPT the common objection identified above — address it before they raise it (if "price", show ROI angle; if "timing", show pilot/test option; if "incumbent", show complementary fit; if "wrong_person", offer to find the right one)
+- Same reply-driving CTA shape
+- IMPORTANT: This must be a REPLY to email #1 — same email thread. Subject must be "Re: [exactly the email #1 subject]". Body should NOT re-introduce — just continue the conversation.
 
-Email #2: ~80 words, new angle, proof not in #1, preempt the objection. Re: thread.
-Email #3: ~50 words, acknowledge inbox noise, last value prop. Re: thread.
-Email #4: ~40 words, warm exit, season-aware. Re: thread.
-LinkedIn invite: under 198 chars, one line, no pitch.
-LinkedIn DM: ~60 words, conversational, same CTA.
+EMAIL #3 (gentle follow-up if LinkedIn not accepted):
+- ~50 words
+- Acknowledge the noise of inboxes
+- One last value prop
+- Soft "if not now, no worries"
+- Subject must be "Re: [exactly the email #1 subject]" — keep the thread alive
 
-OUTPUT — ONLY JSON:
+EMAIL #4 (breakup):
+- ~40 words
+- Warm exit, season-aware (Summer in MENA right now)
+- Door open for the future
+- Subject must be "Re: [exactly the email #1 subject]" — same thread, last message
+
+LINKEDIN INVITE NOTE (under 198 chars):
+- One line about why you're reaching out — no pitch, no link
+
+LINKEDIN DM (if invite accepted):
+- ~60 words, conversational
+- "Glad we connected — quick reason I reached out..."
+- Same CTA as email but conversational
+
+OUTPUT — return ONLY a JSON object, no preamble, no markdown fences:
 {
   "step1_visit": { "type": "linkedin_visit", "day": 0 },
   "step2_invite": { "type": "linkedin_invite", "day": 1, "note": "..." },
@@ -148,12 +178,14 @@ export async function POST(req: NextRequest) {
     .update({ generation_status: 'generating' })
     .eq('id', cp.id)
 
-  const intel = (prospect.research as ProspectResearch | null)?.intel
+  const research = prospect.research as ProspectResearch | null
+  const intel = research?.intel
+  const country = (research?.lemlist_meta?.country as string | undefined) ?? null
 
   let sequence: Sequence
   try {
     const content = await callAnthropic(
-      [{ role: 'user', content: buildPrompt({ prospect, brain, intel }) }],
+      [{ role: 'user', content: buildPrompt({ prospect, country, brain, intel }) }],
       { systemPrompt: SYSTEM, maxTokens: 4000 }
     )
     const text = extractText(content)
@@ -164,6 +196,15 @@ export async function POST(req: NextRequest) {
       .from('campaign_prospects')
       .update({ generation_status: 'failed' })
       .eq('id', cp.id)
+
+    await admin.from('usage_events').insert({
+      organization_id: orgId,
+      event_type: 'sequence_generation',
+      cost_credits: 0,
+      cost_usd: 0,
+      metadata: { prospect_id: cp.prospect_id, status: 'failed', error: (e as Error).message },
+    })
+
     return NextResponse.json(
       { error: 'generation_failed', message: (e as Error).message },
       { status: 502 }
@@ -177,6 +218,14 @@ export async function POST(req: NextRequest) {
       generation_status: 'ready',
     })
     .eq('id', cp.id)
+
+  await admin.from('usage_events').insert({
+    organization_id: orgId,
+    event_type: 'sequence_generation',
+    cost_credits: 0,
+    cost_usd: 0,
+    metadata: { prospect_id: cp.prospect_id, status: 'ready' },
+  })
 
   return NextResponse.json({ sequence, status: 'ready' })
 }
