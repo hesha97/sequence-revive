@@ -2,14 +2,24 @@
 //   NEXT_PUBLIC_AUTH_MODE=dev → dev sign-in button (one click, no email)
 //   anything else            → real magic-link / OTP code form
 //
-// Production env stays on the email form. Dev mode is opt-in per env.
+// dynamic='force-dynamic' is REQUIRED. Without it Next.js statically
+// pre-renders this page at build time and bakes process.env into the HTML.
+// That means: change the env var on Vercel → redeploy → the static HTML
+// still shows the old branch. force-dynamic evaluates process.env per
+// request, so flipping NEXT_PUBLIC_AUTH_MODE on Vercel is enough; no rebuild.
+//
+// Comparison is whitespace+case tolerant so a stray space in the dashboard
+// value ('dev ', 'Dev', ' DEV ') doesn't silently fall through to email form.
 
 import { LoginForm } from './login-form'
 import { DevSignInButton } from './dev-signin-button'
 
+export const dynamic = 'force-dynamic'
+
 export default function LoginPage() {
-  const devMode = process.env.NEXT_PUBLIC_AUTH_MODE === 'dev'
-  const devEmail = process.env.DEV_USER_EMAIL ?? 'dev@local'
+  const authMode = String(process.env.NEXT_PUBLIC_AUTH_MODE ?? '').trim().toLowerCase()
+  const devMode = authMode === 'dev'
+  const devEmail = (process.env.DEV_USER_EMAIL ?? 'dev@local').trim()
 
   return (
     <main className="min-h-screen bg-soul flex flex-col items-center justify-center px-6 py-24">
