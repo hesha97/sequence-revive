@@ -1,16 +1,33 @@
 'use client'
 
 // Onboarding flow: Welcome → 17 intake questions → compile → brain preview.
-// All field components defined at module level (Pattern 24) — never nested inside
-// OnboardingFlow's body. Apostrophes in JSX text are HTML entities.
+// All field components defined at module level (Pattern 24).
+// MCQ options carry { user, api } — the api value is what's stored on `answers`.
 
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { INTAKE_STEPS, IntakeStep } from './intake-steps'
+import { INTAKE_STEPS, IntakeStep, McqOption } from './intake-steps'
 
 type Answers = Record<string, unknown>
 
-// ====== Field components (MODULE LEVEL — never inside OnboardingFlow) ======
+// ====== Helpers ======
+
+function isMcqOptionSelectedSingle(value: unknown, opt: McqOption): boolean {
+  // Single MCQ stores opt.api as the answer. For array `api` (geography), compare by reference-stable label.
+  if (Array.isArray(opt.api) && Array.isArray(value)) {
+    return JSON.stringify(value) === JSON.stringify(opt.api)
+  }
+  return value === opt.api
+}
+
+function isMcqOptionSelectedMulti(values: unknown, opt: McqOption): boolean {
+  if (!Array.isArray(values)) return false
+  if (typeof opt.api === 'string') return values.includes(opt.api)
+  // Multi MCQ with array api is unsupported (no current step uses it).
+  return false
+}
+
+// ====== Field components (MODULE LEVEL) ======
 
 function FieldText({
   step,
@@ -34,7 +51,7 @@ function FieldText({
   )
 }
 
-function FieldLongText({
+function FieldTextarea({
   step,
   value,
   onChange,
@@ -57,24 +74,24 @@ function FieldLongText({
   )
 }
 
-function FieldSingle({
+function FieldMcqSingle({
   step,
   value,
   onChange,
 }: {
   step: IntakeStep
-  value: string
-  onChange: (v: string) => void
+  value: unknown
+  onChange: (v: string | string[]) => void
 }) {
   return (
     <div className="flex flex-col gap-2">
-      {(step.options ?? []).map((opt) => {
-        const isSelected = value === opt
+      {(step.options ?? []).map((opt, i) => {
+        const isSelected = isMcqOptionSelectedSingle(value, opt)
         return (
           <button
-            key={opt}
+            key={`${opt.user}-${i}`}
             type="button"
-            onClick={() => onChange(opt)}
+            onClick={() => onChange(opt.api)}
             className={`text-left px-4 py-3 rounded-md border transition-colors text-sm
                         ${
                           isSelected
@@ -82,7 +99,7 @@ function FieldSingle({
                             : 'border-earth-border bg-earth-surface text-fg-secondary hover:bg-earth-surfaceHover hover:text-fg-primary'
                         }`}
           >
-            {opt}
+            {opt.user}
           </button>
         )
       })}
@@ -90,7 +107,7 @@ function FieldSingle({
   )
 }
 
-function FieldMulti({
+function FieldMcqMulti({
   step,
   value,
   onChange,
@@ -99,20 +116,22 @@ function FieldMulti({
   value: string[]
   onChange: (v: string[]) => void
 }) {
-  function toggle(opt: string) {
-    if (value.includes(opt)) {
-      onChange(value.filter((v) => v !== opt))
+  function toggle(opt: McqOption) {
+    if (typeof opt.api !== 'string') return // unsupported
+    const api = opt.api
+    if (value.includes(api)) {
+      onChange(value.filter((v) => v !== api))
     } else {
-      onChange([...value, opt])
+      onChange([...value, api])
     }
   }
   return (
     <div className="flex flex-wrap gap-2">
-      {(step.options ?? []).map((opt) => {
-        const isSelected = value.includes(opt)
+      {(step.options ?? []).map((opt, i) => {
+        const isSelected = isMcqOptionSelectedMulti(value, opt)
         return (
           <button
-            key={opt}
+            key={`${opt.user}-${i}`}
             type="button"
             onClick={() => toggle(opt)}
             className={`px-4 py-2 rounded-md border transition-colors text-sm font-mono
@@ -122,10 +141,85 @@ function FieldMulti({
                             : 'border-earth-border bg-earth-surface text-fg-secondary hover:bg-earth-surfaceHover hover:text-fg-primary'
                         }`}
           >
-            {opt}
+            {opt.user}
           </button>
         )
       })}
+    </div>
+  )
+}
+
+function FieldTags({
+  step,
+  values,
+  onChange,
+}: {
+  step: IntakeStep
+  values: string[]
+  onChange: (v: string[]) => void
+}) {
+  const [draft, setDraft] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  function addTag() {
+    const trimmed = draft.trim()
+    if (!trimmed) return
+    if (values.includes(trimmed)) {
+      setDraft('')
+      return
+    }
+    onChange([...values, trimmed])
+    setDraft('')
+  }
+
+  function removeTag(t: string) {
+    onChange(values.filter((v) => v !== t))
+    inputRef.current?.focus()
+  }
+
+  return (
+    <div>
+      <div className="flex flex-wrap gap-2 mb-3">
+        {values.map((t) => (
+          <span
+            key={t}
+            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md
+                       border border-ocean-teal bg-ocean-teal/15 text-fg-primary
+                       text-sm font-mono"
+          >
+            {t}
+            <button
+              type="button"
+              onClick={() => removeTag(t)}
+              className="text-fg-tertiary hover:text-fg-primary transition-colors"
+              aria-label={`Remove ${t}`}
+            >
+              ×
+            </button>
+          </span>
+        ))}
+      </div>
+      <input
+        ref={inputRef}
+        type="text"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ',') {
+            e.preventDefault()
+            addTag()
+          }
+        }}
+        onBlur={addTag}
+        placeholder={step.placeholder ?? 'Type and press Enter'}
+        className="w-full bg-earth-surface border border-earth-border
+                   focus:border-earth-borderActive rounded-md p-3 text-fg-primary
+                   text-sm font-mono placeholder:text-fg-tertiary
+                   outline-none transition-colors"
+      />
+      <p className="text-fg-tertiary text-[10px] font-mono uppercase tracking-widest mt-1">
+        Press Enter to add
+      </p>
     </div>
   )
 }
@@ -139,40 +233,48 @@ function StepBody({
   answers: Answers
   setAnswer: (id: string, v: unknown) => void
 }) {
-  if (step.kind === 'text') {
-    return (
-      <FieldText
-        step={step}
-        value={(answers[step.id] as string) ?? ''}
-        onChange={(v) => setAnswer(step.id, v)}
-      />
-    )
+  switch (step.kind) {
+    case 'text':
+      return (
+        <FieldText
+          step={step}
+          value={(answers[step.id] as string) ?? ''}
+          onChange={(v) => setAnswer(step.id, v)}
+        />
+      )
+    case 'textarea':
+      return (
+        <FieldTextarea
+          step={step}
+          value={(answers[step.id] as string) ?? ''}
+          onChange={(v) => setAnswer(step.id, v)}
+        />
+      )
+    case 'mcq-single':
+      return (
+        <FieldMcqSingle
+          step={step}
+          value={answers[step.id]}
+          onChange={(v) => setAnswer(step.id, v)}
+        />
+      )
+    case 'mcq-multi':
+      return (
+        <FieldMcqMulti
+          step={step}
+          value={(answers[step.id] as string[]) ?? []}
+          onChange={(v) => setAnswer(step.id, v)}
+        />
+      )
+    case 'tags':
+      return (
+        <FieldTags
+          step={step}
+          values={(answers[step.id] as string[]) ?? []}
+          onChange={(v) => setAnswer(step.id, v)}
+        />
+      )
   }
-  if (step.kind === 'longtext') {
-    return (
-      <FieldLongText
-        step={step}
-        value={(answers[step.id] as string) ?? ''}
-        onChange={(v) => setAnswer(step.id, v)}
-      />
-    )
-  }
-  if (step.kind === 'single') {
-    return (
-      <FieldSingle
-        step={step}
-        value={(answers[step.id] as string) ?? ''}
-        onChange={(v) => setAnswer(step.id, v)}
-      />
-    )
-  }
-  return (
-    <FieldMulti
-      step={step}
-      value={(answers[step.id] as string[]) ?? []}
-      onChange={(v) => setAnswer(step.id, v)}
-    />
-  )
 }
 
 // ====== Brain preview (module level) ======
@@ -188,7 +290,18 @@ type Brain = {
   buying_signals?: string[]
   named_proof?: string
   market_context?: string
-  search_filters?: Record<string, string[]>
+  search_filters?: Record<string, unknown>
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="mb-8">
+      <p className="font-mono text-[10px] uppercase tracking-widest text-fg-tertiary mb-2">
+        {title}
+      </p>
+      {children}
+    </div>
+  )
 }
 
 function BrainPreview({ brain }: { brain: Brain }) {
@@ -228,17 +341,11 @@ function BrainPreview({ brain }: { brain: Brain }) {
           </ul>
         </Section>
       )}
-    </div>
-  )
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="mb-8">
-      <p className="font-mono text-[10px] uppercase tracking-widest text-fg-tertiary mb-2">
-        {title}
-      </p>
-      {children}
+      {brain.market_context && (
+        <Section title="Market context">
+          <p className="text-fg-primary leading-relaxed">{brain.market_context}</p>
+        </Section>
+      )}
     </div>
   )
 }
@@ -273,17 +380,36 @@ function Welcome({ onStart }: { onStart: () => void }) {
 
 // ====== Compiling state (module level) ======
 
-function Compiling({ error }: { error: string | null }) {
+function Compiling({
+  error,
+  onRetry,
+}: {
+  error: string | null
+  onRetry: () => void
+}) {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-8 text-center">
       <p className="font-mono text-xs uppercase tracking-widest text-gold mb-6">
         Building your brain
       </p>
       <h1 className="font-serif text-4xl text-fg-primary mb-6 max-w-2xl leading-tight">
-        <span className="italic">Reading your answers. Shaping your voice.</span>
+        <span className="italic">Reading your answers. Studying your market. Building your brain.</span>
       </h1>
       {error ? (
-        <p className="text-signal-hot font-mono text-sm mt-6 max-w-xl">{error}</p>
+        <>
+          <p className="text-signal-hot font-mono text-sm mt-6 max-w-xl mb-6">
+            Couldn&apos;t pull this together right now — {error}. Try again?
+          </p>
+          <button
+            type="button"
+            onClick={onRetry}
+            className="bg-earth-sand text-fg-inverse hover:bg-earth-stone
+                       px-6 py-3 rounded-md font-mono text-xs transition-colors
+                       uppercase tracking-widest"
+          >
+            Try again
+          </button>
+        </>
       ) : (
         <p className="text-fg-secondary text-sm">A few seconds.</p>
       )}
@@ -303,7 +429,15 @@ export function OnboardingFlow({ clientId }: { clientId: string | null }) {
 
   const step = INTAKE_STEPS[stepIndex]
   const totalSteps = INTAKE_STEPS.length
-  const canAdvance = useMemo(() => step.validate(answers[step.id]), [step, answers])
+  const value = answers[step.id]
+  const isValid = step.validate(value)
+  const isEmpty =
+    value === undefined ||
+    value === null ||
+    value === '' ||
+    (Array.isArray(value) && value.length === 0)
+  const canAdvance = useMemo(() => isValid, [isValid])
+  const canSkip = Boolean(step.optional) && isEmpty
 
   function setAnswer(id: string, v: unknown) {
     setAnswers((prev) => ({ ...prev, [id]: v }))
@@ -319,8 +453,8 @@ export function OnboardingFlow({ clientId }: { clientId: string | null }) {
         body: JSON.stringify({ answers, clientId }),
       })
       if (!res.ok) {
-        const errBody = await res.text()
-        throw new Error(`Compile failed (${res.status}): ${errBody.slice(0, 200)}`)
+        const errJson = await res.json().catch(() => ({}))
+        throw new Error(errJson.message ?? errJson.error ?? `Compile failed (${res.status})`)
       }
       const { brain: compiledBrain } = await res.json()
       setBrain(compiledBrain)
@@ -331,7 +465,11 @@ export function OnboardingFlow({ clientId }: { clientId: string | null }) {
   }
 
   function next() {
-    if (!canAdvance) return
+    if (!canAdvance && !canSkip) return
+    if (canSkip && isEmpty) {
+      // Persist a sentinel so the prompt-builder skips this answer.
+      setAnswer(step.id, [])
+    }
     if (stepIndex === totalSteps - 1) {
       compileBrain()
     } else {
@@ -343,12 +481,27 @@ export function OnboardingFlow({ clientId }: { clientId: string | null }) {
     if (stepIndex > 0) setStepIndex(stepIndex - 1)
   }
 
+  // Keyboard: Enter advances when on text/textarea (no shift) — only when can advance.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (phase !== 'asking') return
+      if (e.key === 'Enter' && !e.shiftKey && (step.kind === 'text' || step.kind === 'mcq-single')) {
+        const target = e.target as HTMLElement | null
+        if (target && (target.tagName === 'INPUT' || target.tagName === 'BUTTON')) {
+          if (canAdvance) next()
+        }
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
+
   if (phase === 'welcome') {
     return <Welcome onStart={() => setPhase('asking')} />
   }
 
   if (phase === 'compiling') {
-    return <Compiling error={error} />
+    return <Compiling error={error} onRetry={compileBrain} />
   }
 
   if (phase === 'done' && brain) {
@@ -419,17 +572,29 @@ export function OnboardingFlow({ clientId }: { clientId: string | null }) {
         >
           &larr; Back
         </button>
-        <button
-          type="button"
-          onClick={next}
-          disabled={!canAdvance}
-          className="bg-earth-sand text-fg-inverse hover:bg-earth-stone
-                     px-6 py-3 rounded-md font-mono text-sm transition-colors
-                     uppercase tracking-widest disabled:opacity-30
-                     disabled:cursor-not-allowed"
-        >
-          {stepIndex === totalSteps - 1 ? "Build my brain" : 'Next'}
-        </button>
+        <div className="flex items-center gap-3">
+          {canSkip && (
+            <button
+              type="button"
+              onClick={next}
+              className="font-mono text-xs uppercase tracking-widest text-fg-tertiary
+                         hover:text-fg-primary transition-colors px-4 py-3"
+            >
+              Skip
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={next}
+            disabled={!canAdvance && !canSkip}
+            className="bg-earth-sand text-fg-inverse hover:bg-earth-stone
+                       px-6 py-3 rounded-md font-mono text-sm transition-colors
+                       uppercase tracking-widest disabled:opacity-30
+                       disabled:cursor-not-allowed"
+          >
+            {stepIndex === totalSteps - 1 ? 'Build my brain' : 'Next'}
+          </button>
+        </div>
       </footer>
     </div>
   )

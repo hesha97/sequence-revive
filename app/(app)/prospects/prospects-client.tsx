@@ -142,17 +142,30 @@ function IntelSheet({
   onRefresh: (id: string) => Promise<void>
 }) {
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [warning, setWarning] = useState<string | null>(null)
   const intel = prospect.research?.intel
 
   async function fetchIntel() {
     setLoading(true)
+    setError(null)
+    setWarning(null)
     try {
-      await fetch('/api/ai/research-prospect', {
+      const res = await fetch('/api/ai/research-prospect', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ prospectId: prospect.id }),
       })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(json.message ?? json.error ?? `Research failed (${res.status})`)
+      }
+      if (typeof json.warning === 'string') {
+        setWarning(json.warning)
+      }
       await onRefresh(prospect.id)
+    } catch (e) {
+      setError((e as Error).message)
     } finally {
       setLoading(false)
     }
@@ -160,9 +173,16 @@ function IntelSheet({
 
   async function fetchEnrich() {
     setLoading(true)
+    setError(null)
     try {
-      await fetch(`/api/prospects/enrich/${prospect.id}`)
+      const res = await fetch(`/api/prospects/enrich/${prospect.id}`)
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}))
+        throw new Error(json.message ?? json.error ?? `Enrich failed (${res.status})`)
+      }
       await onRefresh(prospect.id)
+    } catch (e) {
+      setError((e as Error).message)
     } finally {
       setLoading(false)
     }
@@ -203,8 +223,20 @@ function IntelSheet({
               disabled={loading}
               className="bg-earth-sand text-fg-inverse hover:bg-earth-stone px-4 py-2 rounded-md font-mono text-xs uppercase tracking-widest transition-colors disabled:opacity-50"
             >
-              {loading ? 'Researching…' : 'Run research'}
+              {loading ? `Pulling the brief on ${prospect.first_name ?? 'them'}…` : 'Run research'}
             </button>
+          </div>
+        )}
+        {error && (
+          <div className="mb-6 p-3 border border-signal-hot/30 bg-signal-hot/10 rounded-md">
+            <p className="text-signal-hot font-mono text-xs">
+              Couldn&apos;t pull research right now — {error}. Try again?
+            </p>
+          </div>
+        )}
+        {warning && (
+          <div className="mb-6 p-3 border border-signal-warm/30 bg-signal-warm/10 rounded-md">
+            <p className="text-signal-warm font-mono text-xs">{warning}</p>
           </div>
         )}
 
@@ -466,9 +498,17 @@ export function ProspectsClient({ initialProspects }: { initialProspects: Prospe
 
   async function advanceToSelection() {
     setRefining(true)
+    setError(null)
     try {
-      await fetch('/api/ai/refine-prospects', { method: 'POST' })
+      const res = await fetch('/api/ai/refine-prospects', { method: 'POST' })
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}))
+        throw new Error(json.message ?? json.error ?? `Refine failed (${res.status})`)
+      }
       await refreshList()
+      setPhase('select')
+    } catch (e) {
+      setError(`Re-ranking didn't finish — ${(e as Error).message}. Showing your current list.`)
       setPhase('select')
     } finally {
       setRefining(false)
@@ -487,7 +527,9 @@ export function ProspectsClient({ initialProspects }: { initialProspects: Prospe
       <div>
         <EmptyState onSearch={runSearch} loading={searching} />
         {error && (
-          <p className="text-signal-hot text-center font-mono text-xs px-8 pb-8">{error}</p>
+          <p className="text-signal-hot text-center font-mono text-xs px-8 pb-8 max-w-xl mx-auto">
+            We hit a snag finding people — {error}. Try again?
+          </p>
         )}
       </div>
     )
@@ -511,7 +553,7 @@ export function ProspectsClient({ initialProspects }: { initialProspects: Prospe
       />
 
       {error && (
-        <p className="text-signal-hot font-mono text-xs px-8 pt-4">{error}</p>
+        <p className="text-signal-hot font-mono text-xs px-8 pt-4 max-w-xl">{error}</p>
       )}
 
       <div className="p-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

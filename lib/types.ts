@@ -1,25 +1,59 @@
-// Shared shapes used by API routes and clients.
-// The Supabase schema reserves the `research` jsonb column on `prospects` for
-// AI-derived data. We pack verdict + score + archetype into it as well to avoid
-// a schema migration; intel_status enum on the same row tracks research status.
+// Shared shapes for API routes and clients.
+// verdict + score + archetype + lemlist_meta + intel all live inside
+// prospects.research jsonb to avoid schema migrations.
 
+export type IntelSignal = 'hot' | 'warm' | 'cold'
 export type Verdict = 'skip' | 'like' | 'strong'
+export type IntelStatus = 'pending' | 'researching' | 'ready' | 'failed'
+export type GenerationStatus = 'pending' | 'generating' | 'ready' | 'failed'
 
 export type ProspectIntel = {
   about_them?: string
   about_company?: string
   hook?: string
-  signal?: 'hot' | 'warm' | 'cold'
+  signal?: IntelSignal
   recent_signals?: string[]
   researched_at?: string
 }
 
+export type LemlistMeta = {
+  country?: string | null
+  department?: string | null
+  company_size?: string | null
+  company_industry?: string | null
+  company_domain?: string | null
+  headline?: string | null
+}
+
 export type ProspectResearch = {
-  intel?: ProspectIntel
-  verdict?: Verdict
-  archetype?: string
   score?: number
   score_reason?: string
+  archetype?: string
+  verdict?: Verdict
+  intel?: ProspectIntel
+  lemlist_meta?: LemlistMeta
+}
+
+export type ProspectRow = {
+  id: string
+  source_id: string | null
+  first_name: string | null
+  last_name: string | null
+  company_name: string | null
+  job_title: string | null
+  linkedin_url: string | null
+  email: string | null
+  research: ProspectResearch | null
+  intel_status: IntelStatus | string | null
+  source: string | null
+}
+
+export type SearchFilters = {
+  seniorities?: string[]
+  company_sizes?: string[]
+  industries?: string[]
+  departments?: string[]
+  countries?: string[] | string
 }
 
 export type Brain = {
@@ -33,29 +67,10 @@ export type Brain = {
   key_value_props?: string[]
   named_proof?: string
   market_context?: string
-  search_filters?: {
-    seniorities?: string[]
-    company_sizes?: string[]
-    industries?: string[]
-    departments?: string[]
-    countries?: string[]
-  }
+  search_filters?: SearchFilters
   raw_answers?: Record<string, unknown>
   compiled_at?: string
-}
-
-export type ProspectRow = {
-  id: string
-  source_id: string | null
-  first_name: string | null
-  last_name: string | null
-  company_name: string | null
-  job_title: string | null
-  linkedin_url: string | null
-  email: string | null
-  research: ProspectResearch | null
-  intel_status: string | null
-  source: string | null
+  market_intel_error?: string
 }
 
 export type Sequence = {

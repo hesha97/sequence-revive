@@ -2,7 +2,7 @@
 
 // Voice editor — every Field component defined at module level. K3 fix
 // (v4 bug: Field defined inside VoiceScreen caused focus loss every keystroke).
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { Brain } from '@/lib/types'
 
 // Single-line text field (module level)
@@ -94,6 +94,17 @@ function FieldList({
   )
 }
 
+function timeAgo(d: Date): string {
+  const s = Math.floor((Date.now() - d.getTime()) / 1000)
+  if (s < 5) return 'just now'
+  if (s < 60) return `${s}s ago`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}m ago`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h ago`
+  return `${Math.floor(h / 24)}d ago`
+}
+
 export function VoiceClient({
   clientId,
   initialBrain,
@@ -103,26 +114,40 @@ export function VoiceClient({
 }) {
   const [brain, setBrain] = useState<Brain>(initialBrain)
   const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState<'idle' | 'saved' | 'error'>('idle')
+  const [savedAt, setSavedAt] = useState<Date | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [dirty, setDirty] = useState(false)
+  const [, forceTick] = useState(0)
+
+  // Tick once every 15s so "Saved 12s ago" advances visually.
+  useEffect(() => {
+    const id = setInterval(() => forceTick((n) => n + 1), 15000)
+    return () => clearInterval(id)
+  }, [])
 
   function patch(partial: Partial<Brain>) {
     setBrain((prev) => ({ ...prev, ...partial }))
-    setSaved('idle')
+    setError(null)
+    setDirty(true)
   }
 
   async function save() {
     setSaving(true)
-    setSaved('idle')
+    setError(null)
     try {
       const res = await fetch('/api/voice/update', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ clientId, brain }),
       })
-      if (!res.ok) throw new Error('Save failed')
-      setSaved('saved')
-    } catch {
-      setSaved('error')
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}))
+        throw new Error(json.message ?? json.error ?? `Save failed (${res.status})`)
+      }
+      setSavedAt(new Date())
+      setDirty(false)
+    } catch (e) {
+      setError((e as Error).message)
     } finally {
       setSaving(false)
     }
@@ -140,22 +165,28 @@ export function VoiceClient({
           </h1>
         </div>
         <div className="flex items-center gap-3">
-          {saved === 'saved' && (
-            <span className="font-mono text-[10px] uppercase tracking-widest text-ocean-teal">Saved</span>
-          )}
-          {saved === 'error' && (
-            <span className="font-mono text-[10px] uppercase tracking-widest text-signal-hot">Save failed</span>
+          {!dirty && savedAt && !error && (
+            <span className="font-mono text-[10px] uppercase tracking-widest text-ocean-teal">
+              Saved {timeAgo(savedAt)}
+            </span>
           )}
           <button
             type="button"
             onClick={save}
-            disabled={saving}
-            className="bg-earth-sand text-fg-inverse hover:bg-earth-stone px-5 py-2.5 rounded-md font-mono text-xs uppercase tracking-widest transition-colors disabled:opacity-50"
+            disabled={saving || !dirty}
+            className="bg-earth-sand text-fg-inverse hover:bg-earth-stone px-5 py-2.5 rounded-md font-mono text-xs uppercase tracking-widest transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {saving ? 'Saving…' : 'Save'}
+            {saving ? 'Saving…' : 'Save changes'}
           </button>
         </div>
       </header>
+      {error && (
+        <div className="max-w-3xl mx-auto mb-6 p-3 border border-signal-hot/30 bg-signal-hot/10 rounded-md">
+          <p className="text-signal-hot font-mono text-xs">
+            Couldn&apos;t save — {error}. Try again?
+          </p>
+        </div>
+      )}
 
       <div className="max-w-3xl mx-auto">
         <FieldLong

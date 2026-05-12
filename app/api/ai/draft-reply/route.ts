@@ -55,16 +55,17 @@ export async function POST(req: NextRequest) {
 THEY SAID: "${body.reply_text}"
 
 CONTEXT: ${brain.company_summary ?? ''}
+VOICE: ${brain.voice_essence ?? 'professional and warm'}
 
 PERSON: ${prospect?.first_name ?? ''} ${prospect?.last_name ?? ''} at ${prospect?.company_name ?? ''}
 
 Rules:
 - 3 sentences max
 - Warm, professional, not salesy
-- Interested → propose next step (call, credentials pack)
-- Declining → graceful exit, door open
-- Question → answer directly, then propose next step
-- Match their formality
+- If they sound interested → propose next step (call, credentials pack)
+- If declining → graceful exit, door open
+- If asking a question → answer directly, then propose next step
+- Match their formality level
 
 Output ONLY the reply body. No subject line.`
 

@@ -14,6 +14,7 @@ export type CampaignProspectLite = {
   companyName: string
   status: 'pending' | 'generating' | 'ready' | 'failed'
   hasSequence: boolean
+  errorMessage?: string
 }
 
 // Status pill (module level)
@@ -40,16 +41,23 @@ function StatusPill({ status }: { status: CampaignProspectLite['status'] }) {
 // Row (module level)
 function ProspectRow({ item }: { item: CampaignProspectLite }) {
   return (
-    <div className="flex items-center justify-between px-5 py-4 border-b border-earth-deep last:border-0">
-      <div>
-        <p className="font-serif text-base text-fg-primary leading-tight">
-          {item.firstName} {item.lastName}
-        </p>
-        <p className="text-fg-secondary text-xs">
-          {item.jobTitle} · {item.companyName}
-        </p>
+    <div className="px-5 py-4 border-b border-earth-deep last:border-0">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="font-serif text-base text-fg-primary leading-tight">
+            {item.firstName} {item.lastName}
+          </p>
+          <p className="text-fg-secondary text-xs">
+            {item.jobTitle} · {item.companyName}
+          </p>
+        </div>
+        <StatusPill status={item.status} />
       </div>
-      <StatusPill status={item.status} />
+      {item.status === 'failed' && item.errorMessage && (
+        <p className="text-signal-hot text-[10px] font-mono mt-2">
+          Generation failed — {item.errorMessage}
+        </p>
+      )}
     </div>
   )
 }
@@ -74,7 +82,9 @@ export function SequencesClient({
 
   const generateOne = useCallback(async (cpId: string) => {
     setItems((prev) =>
-      prev.map((i) => (i.id === cpId ? { ...i, status: 'generating' } : i))
+      prev.map((i) =>
+        i.id === cpId ? { ...i, status: 'generating', errorMessage: undefined } : i
+      )
     )
     try {
       const res = await fetch('/api/ai/generate-sequence', {
@@ -82,17 +92,32 @@ export function SequencesClient({
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ campaignProspectId: cpId }),
       })
-      const ok = res.ok
+      if (res.ok) {
+        setItems((prev) =>
+          prev.map((i) =>
+            i.id === cpId
+              ? { ...i, status: 'ready', hasSequence: true, errorMessage: undefined }
+              : i
+          )
+        )
+      } else {
+        const json = await res.json().catch(() => ({}))
+        const message: string =
+          (json.message as string) ?? (json.error as string) ?? `failed (${res.status})`
+        setItems((prev) =>
+          prev.map((i) =>
+            i.id === cpId
+              ? { ...i, status: 'failed', errorMessage: message }
+              : i
+          )
+        )
+      }
+    } catch (e) {
+      const message = (e as Error).message
       setItems((prev) =>
         prev.map((i) =>
-          i.id === cpId
-            ? { ...i, status: ok ? 'ready' : 'failed', hasSequence: ok }
-            : i
+          i.id === cpId ? { ...i, status: 'failed', errorMessage: message } : i
         )
-      )
-    } catch {
-      setItems((prev) =>
-        prev.map((i) => (i.id === cpId ? { ...i, status: 'failed' } : i))
       )
     }
   }, [])
