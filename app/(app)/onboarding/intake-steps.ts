@@ -1,253 +1,257 @@
-// Onboarding intake spec — 17 questions, MCQ-heavy.
-// Values for seniority / company_size / countries / departments are the EXACT
-// strings Lemlist accepts. Pattern 14 — API Vocabulary Exactness. Editing these
-// values silently changes search results.
+// app/(app)/onboarding/intake-steps.ts
+//
+// The 17-question v5 intake. Asks what the operator KNOWS.
+// Pain, objection, signals, market context are DERIVED by AI after this.
+//
+// Pattern 14 — every MCQ option has { user, api }. `user` is what the operator
+// sees; `api` is the exact value stored on the answers object. For Lemlist
+// filter steps, `api` values are the literal Lemlist enum strings.
 
-export type IntakeStepKind =
-  | 'text'
-  | 'longtext'
-  | 'single'
-  | 'multi'
+export type FieldKind = 'text' | 'textarea' | 'mcq-single' | 'mcq-multi' | 'tags'
+
+export type McqOption = {
+  user: string
+  api: string | string[]
+}
 
 export type IntakeStep = {
   id: string
-  kind: IntakeStepKind
+  kind: FieldKind
   eyebrow: string
   question: string
   helper?: string
   placeholder?: string
-  options?: string[]
-  // unknown rather than any — narrow at use sites.
+  options?: McqOption[]
+  optional?: boolean
   validate: (v: unknown) => boolean
 }
 
-// Canonical Lemlist filter values
-export const SENIORITIES = [
-  'CxO',
-  'Founder',
-  'Owner',
-  'President',
-  'Vice President',
-  'Director',
-  'Manager',
-  'Senior',
-  'Entry',
-] as const
+const nonEmpty = (v: unknown): boolean =>
+  typeof v === 'string' && v.trim().length > 0
 
-export const COMPANY_SIZES = [
-  '1-10',
-  '11-50',
-  '51-200',
-  '201-500',
-  '501-1000',
-  '1001-5000',
-  '5001-10000',
-  '10001+',
-] as const
+const minWords = (n: number) => (v: unknown): boolean =>
+  typeof v === 'string' && v.trim().split(/\s+/).filter(Boolean).length >= n
 
-export const MENA_COUNTRIES = [
-  'Egypt',
-  'United Arab Emirates',
-  'Saudi Arabia',
-  'Qatar',
-  'Kuwait',
-  'Bahrain',
-  'Oman',
-  'Jordan',
-  'Lebanon',
-  'Morocco',
-  'Tunisia',
-] as const
-
-export const DEPARTMENTS = [
-  'Marketing',
-  'Sales',
-  'Operations',
-  'Procurement',
-  'HR',
-  'Finance',
-  'Engineering',
-  'Product',
-  'Customer Success',
-  'Executive',
-] as const
-
-export const INDUSTRIES = [
-  'B2B SaaS',
-  'Real Estate',
-  'Construction',
-  'Manufacturing',
-  'Hospitality',
-  'Retail',
-  'Healthcare',
-  'Education',
-  'Financial Services',
-  'Professional Services',
-  'E-commerce',
-  'Media',
-] as const
-
-const nonEmpty = (v: unknown) =>
-  typeof v === 'string' ? v.trim().length > 0 : false
-const nonEmptyArray = (v: unknown) =>
+const nonEmptyArray = (v: unknown): boolean =>
   Array.isArray(v) && v.length > 0
 
+const anyValue = (): boolean => true
+
 export const INTAKE_STEPS: IntakeStep[] = [
+  // ---------- CHAPTER 1 — WHO YOU ARE ----------
   {
-    id: 'company_name',
+    id: 'company-name',
     kind: 'text',
-    eyebrow: 'About you',
-    question: "What's the name of your company?",
-    placeholder: 'Revive Agency',
+    eyebrow: 'Who you are',
+    question: "What's your company called?",
+    helper: 'The name people see on your website and emails.',
+    placeholder: 'e.g. Sequence Revive',
     validate: nonEmpty,
   },
   {
-    id: 'what_you_do',
-    kind: 'longtext',
-    eyebrow: 'About you',
-    question: 'In two sentences, what do you do and who do you do it for?',
-    helper: "Plain words. The person you're writing to should picture it.",
-    placeholder:
-      'We help mid-market construction firms in MENA hit their tender targets by running outbound on their behalf.',
+    id: 'company-website',
+    kind: 'text',
+    eyebrow: 'Who you are',
+    question: "What's the website?",
+    helper: "We'll learn your voice from it. Just the domain works.",
+    placeholder: 'e.g. sequencerevive.com',
     validate: nonEmpty,
   },
   {
-    id: 'named_proof',
-    kind: 'longtext',
-    eyebrow: 'About you',
-    question: "Name two or three clients you've done this for, plus one outcome each.",
-    helper: 'Real names, real results. This becomes the proof points in every email.',
-    placeholder:
-      'Sahmoud Group — 12 booked meetings in 3 months. Etisalat — 4 enterprise pilots opened.',
-    validate: nonEmpty,
-  },
-  {
-    id: 'voice_register',
-    kind: 'single',
-    eyebrow: 'Your voice',
-    question: 'How do you want to sound?',
+    id: 'company-stage',
+    kind: 'mcq-single',
+    eyebrow: 'Who you are',
+    question: 'What stage is the company in?',
     options: [
-      'Direct and corporate — like a senior consultant',
-      'Warm and conversational — like a thoughtful friend',
-      'Confident and brief — like a busy executive',
-      'Curious and analytical — like a researcher',
+      { user: 'Pre-launch / building', api: 'pre_launch' },
+      { user: 'Just launched / first paying customers', api: 'early' },
+      { user: 'Growing / scaling team and revenue', api: 'growth' },
+      { user: 'Established / known in our market', api: 'established' },
+      { user: 'Enterprise / mature business', api: 'mature' },
     ],
     validate: nonEmpty,
   },
   {
-    id: 'voice_constraints',
-    kind: 'longtext',
-    eyebrow: 'Your voice',
-    question: 'Any words, phrases, or moves to avoid?',
-    helper: 'Optional. Anything that would feel off in your voice.',
-    placeholder: 'No exclamation marks. No "I hope this finds you well."',
-    validate: () => true,
+    id: 'your-role',
+    kind: 'mcq-single',
+    eyebrow: 'Who you are',
+    question: "What's your role?",
+    options: [
+      { user: 'Founder / CEO', api: 'founder' },
+      { user: 'Head of Sales / BD', api: 'head_sales' },
+      { user: 'Sales / BD individual contributor', api: 'ic_sales' },
+      { user: 'Marketing leader', api: 'marketing' },
+      { user: 'Recruiter / Talent', api: 'recruiter' },
+      { user: 'Other operator', api: 'other' },
+    ],
+    validate: nonEmpty,
   },
   {
-    id: 'ideal_buyer_title',
-    kind: 'multi',
-    eyebrow: 'Who you want to reach',
-    question: 'What seniority levels are you reaching out to?',
+    id: 'what-you-sell',
+    kind: 'textarea',
+    eyebrow: 'Who you are',
+    question: 'In a paragraph — what do you sell, and to whom?',
+    helper: "Plain language. The way you'd tell a friend at dinner. This becomes the spine of every email.",
+    placeholder: "We help mid-market construction firms in MENA hit their tender targets by running outbound on their behalf.",
+    validate: minWords(12),
+  },
+
+  // ---------- CHAPTER 2 — WHO YOU REACH ----------
+  {
+    id: 'ideal-buyer-title',
+    kind: 'mcq-multi',
+    eyebrow: 'Who you reach',
+    question: 'What seniority typically buys from you?',
     helper: 'Pick all that apply. These become exact search filters.',
-    options: [...SENIORITIES],
+    options: [
+      { user: 'Owner / Founder', api: 'Ownership / Firm Leadership' },
+      { user: 'C-Suite (CEO, CTO, CMO, etc.)', api: 'Executive Leadership' },
+      { user: 'VP / Vice President', api: 'Executive Leadership' },
+      { user: 'Director / Head of...', api: 'Department Leadership' },
+      { user: 'Manager / Team Lead', api: 'People Management / Leadership' },
+      { user: 'Senior Individual Contributor', api: 'Upper Mid-Level / Experienced IC' },
+    ],
     validate: nonEmptyArray,
   },
   {
-    id: 'ideal_buyer_departments',
-    kind: 'multi',
-    eyebrow: 'Who you want to reach',
-    question: 'Which departments inside the company?',
-    options: [...DEPARTMENTS],
+    id: 'ideal-buyer-departments',
+    kind: 'mcq-multi',
+    eyebrow: 'Who you reach',
+    question: 'Which departments do they sit in?',
+    options: [
+      { user: 'HR / People / Talent', api: 'Human Resources' },
+      { user: 'Marketing / Brand', api: 'Marketing' },
+      { user: 'Sales / BD / Revenue', api: 'Sales' },
+      { user: 'Procurement / Supply Chain', api: 'Purchasing' },
+      { user: 'Operations', api: 'Operations' },
+      { user: 'Engineering / Product', api: 'Engineering' },
+      { user: 'Finance', api: 'Finance' },
+      { user: 'Founder / Owner (no specific dept)', api: 'Business Development' },
+    ],
     validate: nonEmptyArray,
   },
   {
-    id: 'ideal_buyer_description',
-    kind: 'longtext',
-    eyebrow: 'Who you want to reach',
-    question: 'Describe the buyer you want to talk to.',
-    helper: 'Be vivid and specific — title, what their week looks like, who they answer to.',
-    placeholder:
-      "A Head of Marketing at a 200-person construction firm who owns the pipeline number but doesn't have a BDR team.",
-    validate: nonEmpty,
-  },
-  {
-    id: 'ideal_company_size',
-    kind: 'multi',
-    eyebrow: 'Who you want to reach',
-    question: 'How big are their companies?',
-    options: [...COMPANY_SIZES],
+    id: 'ideal-company-size',
+    kind: 'mcq-multi',
+    eyebrow: 'Who you reach',
+    question: 'What size companies are your sweet spot?',
+    options: [
+      { user: 'Solo / very small (1-10)', api: '1-10' },
+      { user: 'Growing (11-50)', api: '11-50' },
+      { user: 'Mid-size (51-200)', api: '51-200' },
+      { user: 'Large (201-500)', api: '201-500' },
+      { user: 'Enterprise (501-1000)', api: '501-1000' },
+      { user: 'Very large (1001-5000)', api: '1001-5000' },
+      { user: 'Massive (5000+)', api: '5001-10000' },
+    ],
     validate: nonEmptyArray,
   },
   {
-    id: 'ideal_industries',
-    kind: 'multi',
-    eyebrow: 'Who you want to reach',
-    question: 'Which industries?',
-    options: [...INDUSTRIES],
+    id: 'ideal-industries',
+    kind: 'tags',
+    eyebrow: 'Who you reach',
+    question: 'Which industries? (3-7 is the sweet spot)',
+    helper: "Type and press Enter. Be specific — 'B2B SaaS' beats 'Software'.",
+    placeholder: 'e.g. B2B SaaS',
     validate: nonEmptyArray,
   },
   {
-    id: 'ideal_countries',
-    kind: 'multi',
-    eyebrow: 'Who you want to reach',
-    question: 'Which countries?',
-    options: [...MENA_COUNTRIES],
-    validate: nonEmptyArray,
+    id: 'geography',
+    kind: 'mcq-single',
+    eyebrow: 'Who you reach',
+    question: 'Where are these people?',
+    options: [
+      { user: 'Egypt only', api: ['Egypt'] },
+      { user: 'Egypt + GCC', api: ['Egypt', 'United Arab Emirates', 'Saudi Arabia', 'Kuwait', 'Qatar', 'Bahrain', 'Oman'] },
+      { user: 'MENA region', api: ['Egypt', 'United Arab Emirates', 'Saudi Arabia', 'Kuwait', 'Qatar', 'Bahrain', 'Oman', 'Jordan', 'Lebanon', 'Morocco', 'Tunisia', 'Algeria'] },
+      { user: 'Europe', api: ['United Kingdom', 'Germany', 'France', 'Netherlands', 'Spain', 'Italy', 'Ireland', 'Sweden', 'Denmark', 'Belgium'] },
+      { user: 'United States + Canada', api: ['United States', 'Canada'] },
+      { user: 'Anywhere', api: 'Global' },
+    ],
+    validate: (v) => v !== undefined && v !== null,
+  },
+
+  // ---------- CHAPTER 3 — THE CONVERSATION ----------
+  {
+    id: 'biggest-win-story',
+    kind: 'textarea',
+    eyebrow: 'The conversation',
+    question: 'Tell us about your favorite client win — in 2-3 sentences.',
+    helper: "The story you tell at dinner. We'll learn your selling instinct from how you talk about it.",
+    placeholder: 'Sahmoud Group — we opened 12 booked meetings in 3 months with Egypt mid-market construction.',
+    validate: minWords(10),
   },
   {
-    id: 'buyer_daily_pain',
-    kind: 'longtext',
+    id: 'decision-window',
+    kind: 'mcq-single',
     eyebrow: 'The conversation',
-    question: 'What pain does this buyer feel every single day?',
-    helper: 'Not the thing you solve — the thing they actually feel when they open their inbox.',
-    placeholder:
-      "Their leadership keeps asking for the pipeline number and they don't have an honest answer.",
+    question: 'How fast do your deals usually move?',
+    options: [
+      { user: 'Pretty fast — under a month', api: 'fast' },
+      { user: 'Steady — 1-3 months', api: 'medium' },
+      { user: 'Patient — 3-6 months', api: 'long' },
+      { user: 'Long game — 6+ months', api: 'enterprise' },
+    ],
+    validate: nonEmpty,
+  },
+
+  // ---------- CHAPTER 4 — YOUR EDGE ----------
+  {
+    id: 'tone-register',
+    kind: 'mcq-single',
+    eyebrow: 'Your edge',
+    question: 'How do you want to come across?',
+    options: [
+      { user: 'Warm + human (like a coffee chat)', api: 'warm_human' },
+      { user: 'Professional + direct (no fluff)', api: 'professional_direct' },
+      { user: "Confident + bold (we know we're great)", api: 'confident_bold' },
+      { user: 'Quiet + premium (like a luxury concierge)', api: 'quiet_premium' },
+      { user: 'Witty + clever (a little personality)', api: 'witty_clever' },
+      { user: 'Technical + precise (peer to peer)', api: 'technical_precise' },
+    ],
     validate: nonEmpty,
   },
   {
-    id: 'common_objection',
-    kind: 'longtext',
-    eyebrow: 'The conversation',
-    question: 'When this buyer says no, what do they usually say?',
-    helper: "The push-back you hear most often. We'll preempt it in email two.",
-    placeholder: 'We already have a marketing agency. / Budget is locked for the year.',
+    id: 'cta-style',
+    kind: 'mcq-single',
+    eyebrow: 'Your edge',
+    question: "What's the right ask in email #1?",
+    options: [
+      { user: 'Reply yes → I send credentials/info pack (AVL-style)', api: 'reply_yes' },
+      { user: 'Reply with availability → I send calendar link', api: 'reply_avail' },
+      { user: 'Click to book directly', api: 'book_link' },
+      { user: 'Reply with a single yes/no question', api: 'yes_no' },
+      { user: "Open-ended: 'worth a quick chat?'", api: 'open_ended' },
+    ],
     validate: nonEmpty,
   },
   {
-    id: 'winning_argument',
-    kind: 'longtext',
-    eyebrow: 'The conversation',
-    question: "What's the one argument that actually closes them?",
-    helper: 'Lead with this in email one.',
-    placeholder: "You don't replace your agency. We just open meetings they can't.",
+    id: 'proof-and-clients',
+    kind: 'textarea',
+    eyebrow: 'Your edge',
+    question: 'Name 2-4 clients or named results we can reference.',
+    helper: "Real names land harder than 'a leading enterprise'. If pre-launch, write 'N/A' — we'll lead with vision instead.",
+    placeholder: 'Sahmoud Group, Siemens, Heidelberg Materials',
     validate: nonEmpty,
   },
   {
-    id: 'buying_signals',
-    kind: 'longtext',
-    eyebrow: 'The conversation',
-    question: 'What signals tell you a company is about to buy?',
-    helper: 'List 5-7 short ones, one per line. We use these to score people.',
-    placeholder:
-      'Just raised funding. Posting BDR job. New CMO in the last 6 months. Sponsoring a trade show.',
-    validate: nonEmpty,
+    id: 'forbidden-phrases',
+    kind: 'tags',
+    eyebrow: 'Your edge',
+    question: 'Any phrases we should NEVER use?',
+    helper: "Words or claims that feel off-brand. (Optional — press skip if none come to mind.)",
+    placeholder: "e.g. 'I hope this finds you well'",
+    optional: true,
+    validate: anyValue,
   },
   {
-    id: 'key_value_props',
-    kind: 'longtext',
-    eyebrow: 'The conversation',
-    question: 'List your 3-4 strongest value props in short phrases.',
-    helper: 'One per line. We rotate them across emails.',
-    placeholder: 'AVL-aware MENA outbound. Named-client proof. Compliant by default. 14-day pilot.',
-    validate: nonEmpty,
-  },
-  {
-    id: 'market_context',
-    kind: 'longtext',
-    eyebrow: 'The conversation',
-    question: "In one or two sentences, what's happening in their industry right now?",
-    helper: 'The thing they read about this week.',
-    placeholder: 'Tender cycles are tightening across the GCC and procurement is moving in-house.',
-    validate: nonEmpty,
+    id: 'named-competitors',
+    kind: 'tags',
+    eyebrow: 'Your edge',
+    question: 'Who do you compete with most often?',
+    helper: "We'll never trash-talk them — but we'll know to position around them.",
+    placeholder: 'e.g. Lemlist, Apollo',
+    optional: true,
+    validate: anyValue,
   },
 ]
