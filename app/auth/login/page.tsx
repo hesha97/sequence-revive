@@ -11,7 +11,7 @@ export default function LoginPage() {
           Welcome back
         </h1>
         <p className="text-fg-secondary text-sm leading-relaxed mb-12 text-center">
-          Enter your email. We&apos;ll send you a sign-in link.
+          Enter your email. We&apos;ll send you a 6-digit code.
         </p>
         <LoginForm />
       </div>
