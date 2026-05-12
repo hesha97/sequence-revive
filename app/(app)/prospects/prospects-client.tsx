@@ -498,9 +498,17 @@ export function ProspectsClient({ initialProspects }: { initialProspects: Prospe
 
   async function advanceToSelection() {
     setRefining(true)
+    setError(null)
     try {
-      await fetch('/api/ai/refine-prospects', { method: 'POST' })
+      const res = await fetch('/api/ai/refine-prospects', { method: 'POST' })
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}))
+        throw new Error(json.message ?? json.error ?? `Refine failed (${res.status})`)
+      }
       await refreshList()
+      setPhase('select')
+    } catch (e) {
+      setError(`Re-ranking didn't finish — ${(e as Error).message}. Showing your current list.`)
       setPhase('select')
     } finally {
       setRefining(false)
@@ -519,7 +527,9 @@ export function ProspectsClient({ initialProspects }: { initialProspects: Prospe
       <div>
         <EmptyState onSearch={runSearch} loading={searching} />
         {error && (
-          <p className="text-signal-hot text-center font-mono text-xs px-8 pb-8">{error}</p>
+          <p className="text-signal-hot text-center font-mono text-xs px-8 pb-8 max-w-xl mx-auto">
+            We hit a snag finding people — {error}. Try again?
+          </p>
         )}
       </div>
     )
@@ -543,7 +553,7 @@ export function ProspectsClient({ initialProspects }: { initialProspects: Prospe
       />
 
       {error && (
-        <p className="text-signal-hot font-mono text-xs px-8 pt-4">{error}</p>
+        <p className="text-signal-hot font-mono text-xs px-8 pt-4 max-w-xl">{error}</p>
       )}
 
       <div className="p-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

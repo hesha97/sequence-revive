@@ -305,7 +305,9 @@ export function ApproveClient({
           </button>
         </div>
         {error && (
-          <p className="text-signal-hot font-mono text-xs mt-3 max-w-3xl mx-auto">{error}</p>
+          <p className="text-signal-hot font-mono text-xs mt-3 max-w-3xl mx-auto">
+            Couldn&apos;t save your sequences — {error}. Try again?
+          </p>
         )}
       </header>
 
