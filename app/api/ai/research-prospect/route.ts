@@ -11,8 +11,14 @@ import { callAnthropic, extractText, parseJsonLoose } from '@/lib/anthropic'
 import type { ProspectIntel, ProspectResearch } from '@/lib/types'
 
 export const runtime = 'nodejs'
-export const maxDuration = 60
+// Pro-tier max. Two parallel web_search legs (person + company), each
+// capped at 60s, with 429 retry headroom. 60s was killing the retry path.
+export const maxDuration = 300
 export const dynamic = 'force-dynamic'
+
+// Per-leg wall-time cap. Bounded so a stalled or chained web_search can't
+// hog the function budget.
+const LEG_TIMEOUT_MS = 60_000
 
 type PersonResult = {
   about_them?: string
@@ -27,12 +33,21 @@ type CompanyResult = {
 
 type LegResult<T> = { ok: true; data: T } | { ok: false; error: string }
 
-async function searchPerson(p: {
-  first_name: string | null
-  last_name: string | null
-  job_title: string | null
-  company_name: string | null
-}): Promise<LegResult<PersonResult>> {
+type LegContext = {
+  orgId: string
+  userId: string
+  prospectId: string
+}
+
+async function searchPerson(
+  p: {
+    first_name: string | null
+    last_name: string | null
+    job_title: string | null
+    company_name: string | null
+  },
+  ctx: LegContext
+): Promise<LegResult<PersonResult>> {
   const fullName = `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim() || '(unnamed)'
   const prompt = `Research this person for B2B outreach context: ${fullName}, ${p.job_title ?? '(no title)'} at ${p.company_name ?? '(no company)'}.
 
@@ -42,24 +57,43 @@ Search the web. Then return ONLY a JSON object (no markdown, no prose):
   "conversation_hook": "1-2 sentences: specific opening angle referencing a real recent thing",
   "signal_strength": "hot" or "warm" or "cold"
 }`
+  const abort = new AbortController()
+  const timer = setTimeout(() => abort.abort(), LEG_TIMEOUT_MS)
   try {
     const content = await callAnthropic(
       [{ role: 'user', content: prompt }],
       {
         systemPrompt: 'Output ONLY valid JSON.',
         maxTokens: 1500,
-        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+        // Cap to 2 searches so the model can't chain 5+ page reads.
+        tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 2 }],
+        signal: abort.signal,
+        organizationId: ctx.orgId,
+        userId: ctx.userId,
+        callType: 'research_prospect.person',
+        metadata: { prospect_id: ctx.prospectId },
       }
     )
     const text = extractText(content)
     const data = parseJsonLoose<PersonResult>(text)
     return { ok: true, data }
   } catch (e) {
-    return { ok: false, error: (e as Error).message }
+    const aborted = abort.signal.aborted
+    return {
+      ok: false,
+      error: aborted
+        ? `person research timed out after ${LEG_TIMEOUT_MS}ms`
+        : (e as Error).message,
+    }
+  } finally {
+    clearTimeout(timer)
   }
 }
 
-async function searchCompany(companyName: string | null): Promise<LegResult<CompanyResult>> {
+async function searchCompany(
+  companyName: string | null,
+  ctx: LegContext
+): Promise<LegResult<CompanyResult>> {
   if (!companyName) return { ok: false, error: 'no company name on record' }
   const prompt = `Research this company: ${companyName}. Recent news, hiring, funding, RFPs, leadership changes (last 6 months).
 
@@ -68,20 +102,35 @@ Return ONLY JSON:
   "about_company": "3 sentences max — recent moves, hiring, news",
   "recent_signals": ["list of 2-3 specific recent events"]
 }`
+  const abort = new AbortController()
+  const timer = setTimeout(() => abort.abort(), LEG_TIMEOUT_MS)
   try {
     const content = await callAnthropic(
       [{ role: 'user', content: prompt }],
       {
         systemPrompt: 'Output ONLY valid JSON.',
         maxTokens: 1500,
-        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+        tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 2 }],
+        signal: abort.signal,
+        organizationId: ctx.orgId,
+        userId: ctx.userId,
+        callType: 'research_prospect.company',
+        metadata: { prospect_id: ctx.prospectId, company_name: companyName },
       }
     )
     const text = extractText(content)
     const data = parseJsonLoose<CompanyResult>(text)
     return { ok: true, data }
   } catch (e) {
-    return { ok: false, error: (e as Error).message }
+    const aborted = abort.signal.aborted
+    return {
+      ok: false,
+      error: aborted
+        ? `company research timed out after ${LEG_TIMEOUT_MS}ms`
+        : (e as Error).message,
+    }
+  } finally {
+    clearTimeout(timer)
   }
 }
 
@@ -130,9 +179,10 @@ export async function POST(req: NextRequest) {
     .eq('id', prospect.id)
     .eq('organization_id', orgId)
 
+  const legCtx: LegContext = { orgId, userId: user.id, prospectId: prospect.id }
   const [person, company] = await Promise.all([
-    searchPerson(prospect),
-    searchCompany(prospect.company_name),
+    searchPerson(prospect, legCtx),
+    searchCompany(prospect.company_name, legCtx),
   ])
 
   // Both failed → mark failed + 502 with both errors

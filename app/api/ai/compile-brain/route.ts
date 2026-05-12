@@ -9,8 +9,15 @@ import { callAnthropic, extractText, parseJsonLoose } from '@/lib/anthropic'
 import { INTAKE_STEPS } from '@/app/(app)/onboarding/intake-steps'
 
 export const runtime = 'nodejs'
-export const maxDuration = 60
+// Pro-tier serverless max. Web_search + synthesis together routinely hit
+// 60-90s on first compile; 60s was timing out at the Vercel edge with 504.
+export const maxDuration = 300
 export const dynamic = 'force-dynamic'
+
+// Hard cap on the web_search leg so a slow/looping search can't eat the
+// whole function budget. If we hit this, we fall through to synthesis-only
+// (the prompt already handles 'market research unavailable').
+const MARKET_INTEL_TIMEOUT_MS = 60_000
 
 const SYNTHESIS_SYSTEM =
   'You are a precise data synthesizer. Output ONLY valid JSON. No prose, no markdown fences.'
@@ -123,22 +130,42 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'No organization for user' }, { status: 500 })
   }
 
-  // STEP A — Market intel via web_search. On failure, log and continue with empty marketIntel.
+  // STEP A — Market intel via web_search.
+  // Two safety nets:
+  //   1. max_uses: 2 caps the model at 2 web searches (was unbounded — saw 5+
+  //      searches blow past 60s).
+  //   2. AbortController with MARKET_INTEL_TIMEOUT_MS forces a hard ceiling
+  //      so even if Anthropic stalls we never spend our whole function budget
+  //      on this leg.
+  // On failure (timeout, abort, or any other error) we log and fall through —
+  // the synthesis prompt explicitly handles empty marketIntel.
   let marketIntel = ''
   let marketIntelError: string | null = null
+  const marketAbort = new AbortController()
+  const marketTimer = setTimeout(() => marketAbort.abort(), MARKET_INTEL_TIMEOUT_MS)
   try {
     const content = await callAnthropic(
       [{ role: 'user', content: buildMarketIntelPrompt(answers) }],
       {
         systemPrompt: MARKET_INTEL_SYSTEM,
         maxTokens: 1500,
-        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+        tools: [
+          { type: 'web_search_20250305', name: 'web_search', max_uses: 2 },
+        ],
+        signal: marketAbort.signal,
+        organizationId: orgId,
+        userId: user.id,
+        callType: 'compile_brain.market_intel',
       }
     )
     marketIntel = extractText(content)
   } catch (e) {
-    marketIntelError = (e as Error).message
+    marketIntelError = marketAbort.signal.aborted
+      ? `market intel timed out after ${MARKET_INTEL_TIMEOUT_MS}ms — synthesizing from intake only`
+      : (e as Error).message
     console.error('Market intel web_search failed:', marketIntelError)
+  } finally {
+    clearTimeout(marketTimer)
   }
 
   // STEP B — Synthesize the brain.
@@ -146,7 +173,13 @@ export async function POST(req: NextRequest) {
   try {
     const content = await callAnthropic(
       [{ role: 'user', content: buildSynthesisPrompt(summarizeAnswers(answers), marketIntel) }],
-      { systemPrompt: SYNTHESIS_SYSTEM, maxTokens: 2500 }
+      {
+        systemPrompt: SYNTHESIS_SYSTEM,
+        maxTokens: 2500,
+        organizationId: orgId,
+        userId: user.id,
+        callType: 'compile_brain.synthesis',
+      }
     )
     const text = extractText(content)
     try {

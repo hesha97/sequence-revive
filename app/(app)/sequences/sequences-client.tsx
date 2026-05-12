@@ -1,6 +1,6 @@
 'use client'
 
-// Sequence generation progress. Concurrency limited to 5 in flight.
+// Sequence generation progress. Concurrency limited to 3 in flight.
 // Each prospect's status: pending -> generating -> ready | failed.
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
@@ -62,7 +62,11 @@ function ProspectRow({ item }: { item: CampaignProspectLite }) {
   )
 }
 
-const MAX_CONCURRENT = 5
+// Tuned for Anthropic Tier 1 (30K input tok/min, 8K output tok/min).
+// Each sequence call uses ~1500 in / ~1000 out, so 3 in flight keeps us
+// well under the per-minute caps and avoids 429-then-retry stacking
+// (which used to push individual prospects past the route's wall-time).
+const MAX_CONCURRENT = 3
 
 export function SequencesClient({
   items: initialItems,
