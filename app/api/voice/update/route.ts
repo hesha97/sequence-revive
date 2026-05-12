@@ -39,18 +39,28 @@ export async function POST(req: NextRequest) {
   if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
   const prevBrain = (existing.brain as Record<string, unknown> | null) ?? {}
+  // Preserve targeting (search_filters) + raw_answers + compiled_at across voice edits.
+  // search_filters are set during onboarding, not via voice. Wiping them here
+  // would break Find People silently.
   const merged: Record<string, unknown> = {
     ...body.brain,
+    search_filters: prevBrain.search_filters,
     raw_answers: prevBrain.raw_answers,
     compiled_at: prevBrain.compiled_at,
     edited_at: new Date().toISOString(),
   }
 
-  await admin
+  const { error: updateErr } = await admin
     .from('clients')
     .update({ brain: merged })
     .eq('id', body.clientId)
     .eq('organization_id', orgId)
+  if (updateErr) {
+    return NextResponse.json(
+      { error: 'persist_failed', message: updateErr.message },
+      { status: 500 }
+    )
+  }
 
   return NextResponse.json({ ok: true })
 }
