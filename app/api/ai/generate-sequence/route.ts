@@ -246,7 +246,14 @@ export async function POST(req: NextRequest) {
   }
   clearTimeout(callTimer)
 
-  await admin
+  // Critical: check the UPDATE error. Previously this was fire-and-forget,
+  // which silently dropped writes when a CHECK constraint rejected the new
+  // status value (the schema's CHECK expected 'complete' but the route
+  // wrote 'ready'). The Anthropic call succeeded, the audit row landed, but
+  // the sequence never made it to the DB and the row stayed in 'generating'.
+  // Now we surface the failure, mark the row 'failed', and return 500 so
+  // the operator can retry instead of getting stuck in a silent loop.
+  const { error: saveErr } = await admin
     .from('campaign_prospects')
     .update({
       generated_emails: sequence,
@@ -254,6 +261,33 @@ export async function POST(req: NextRequest) {
       last_action_at: new Date().toISOString(),
     })
     .eq('id', cp.id)
+
+  if (saveErr) {
+    await admin
+      .from('campaign_prospects')
+      .update({
+        generation_status: 'failed',
+        last_action_at: new Date().toISOString(),
+      })
+      .eq('id', cp.id)
+
+    await admin.from('usage_events').insert({
+      organization_id: orgId,
+      event_type: 'sequence_generation',
+      cost_credits: 0,
+      cost_usd: 0,
+      metadata: {
+        prospect_id: cp.prospect_id,
+        status: 'failed',
+        error: `save_failed: ${saveErr.message}`,
+      },
+    })
+
+    return NextResponse.json(
+      { error: 'persist_failed', message: saveErr.message },
+      { status: 500 }
+    )
+  }
 
   await admin.from('usage_events').insert({
     organization_id: orgId,

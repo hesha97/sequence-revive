@@ -262,8 +262,50 @@ export function extractText(content: ContentBlock[]): string {
     .trim()
 }
 
-// Strict JSON parse with markdown-fence cleanup. Throws on bad JSON.
+// Tolerant JSON parse. Tries strict first (after stripping ```json fences).
+// If the model added preamble ("Here's the sequence:") or trailing prose
+// ("Let me know if you want changes."), falls back to extracting the
+// outermost { ... } block by tracking brace depth (respecting string literals
+// so braces inside strings don't fool the counter). Throws if neither path
+// yields valid JSON, so the route's catch can mark the row failed cleanly.
 export function parseJsonLoose<T = unknown>(text: string): T {
   const cleaned = text.replace(/```json|```/g, '').trim()
-  return JSON.parse(cleaned) as T
+  try {
+    return JSON.parse(cleaned) as T
+  } catch {
+    const extracted = extractFirstJsonObject(cleaned)
+    if (!extracted) {
+      throw new Error(
+        `JSON parse failed and no { ... } block found in response (first 300 chars: ${cleaned.slice(0, 300)})`
+      )
+    }
+    return JSON.parse(extracted) as T
+  }
+}
+
+// Walks the string, finds the first '{', then tracks brace depth + string
+// state (handles escaped quotes) until the matching '}' closes the object.
+// Returns the substring or null if no balanced object exists.
+function extractFirstJsonObject(s: string): string | null {
+  const start = s.indexOf('{')
+  if (start < 0) return null
+  let depth = 0
+  let inString = false
+  let escaped = false
+  for (let i = start; i < s.length; i++) {
+    const c = s[i]
+    if (escaped) { escaped = false; continue }
+    if (inString) {
+      if (c === '\\') { escaped = true; continue }
+      if (c === '"') inString = false
+      continue
+    }
+    if (c === '"') { inString = true; continue }
+    if (c === '{') depth++
+    else if (c === '}') {
+      depth--
+      if (depth === 0) return s.slice(start, i + 1)
+    }
+  }
+  return null
 }
