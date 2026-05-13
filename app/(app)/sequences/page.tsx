@@ -121,6 +121,23 @@ export default async function SequencesPage() {
     }
   }
 
+  // Heal orphaned 'generating' rows before we render. A row stuck in
+  // 'generating' with no generated_emails and either no last_action_at OR a
+  // last_action_at older than 3 minutes is from a previously killed function
+  // (Vercel 504 before our 120s timeout could catch it, or a deploy mid-call).
+  // The client gates on generatingCount >= MAX_CONCURRENT, so even one stuck
+  // row blocks the whole queue — reset them to 'pending' so the queue moves.
+  // Three minutes is well outside our 120s SEQUENCE_TIMEOUT_MS, so we won't
+  // race a genuinely in-flight call.
+  const orphanCutoff = new Date(Date.now() - 3 * 60 * 1000).toISOString()
+  await admin
+    .from('campaign_prospects')
+    .update({ generation_status: 'pending', last_action_at: null })
+    .eq('campaign_id', campaignId)
+    .eq('generation_status', 'generating')
+    .is('generated_emails', null)
+    .or(`last_action_at.is.null,last_action_at.lt.${orphanCutoff}`)
+
   // Re-fetch with prospect names joined
   const { data: cps } = await admin
     .from('campaign_prospects')

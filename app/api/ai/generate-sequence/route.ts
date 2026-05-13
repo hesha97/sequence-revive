@@ -180,10 +180,15 @@ export async function POST(req: NextRequest) {
   const brain = (client?.brain as Brain) ?? null
   if (!brain) return NextResponse.json({ error: 'No brain' }, { status: 400 })
 
-  // Mark generating
+  // Mark generating. Stamp last_action_at so the page bootstrap can
+  // distinguish a genuinely in-flight call (recent stamp) from an orphaned
+  // row left behind by a previously killed function (NULL or stale stamp).
   await admin
     .from('campaign_prospects')
-    .update({ generation_status: 'generating' })
+    .update({
+      generation_status: 'generating',
+      last_action_at: new Date().toISOString(),
+    })
     .eq('id', cp.id)
 
   const research = prospect.research as ProspectResearch | null
@@ -209,10 +214,14 @@ export async function POST(req: NextRequest) {
     const text = extractText(content)
     sequence = parseJsonLoose<Sequence>(text)
   } catch (e) {
-    // K4 fix — fail this prospect, leave others alone
+    // K4 fix — fail this prospect, leave others alone. Stamp last_action_at
+    // so the row's final state has a clear timestamp.
     await admin
       .from('campaign_prospects')
-      .update({ generation_status: 'failed' })
+      .update({
+        generation_status: 'failed',
+        last_action_at: new Date().toISOString(),
+      })
       .eq('id', cp.id)
 
     await admin.from('usage_events').insert({
@@ -242,6 +251,7 @@ export async function POST(req: NextRequest) {
     .update({
       generated_emails: sequence,
       generation_status: 'ready',
+      last_action_at: new Date().toISOString(),
     })
     .eq('id', cp.id)
 
